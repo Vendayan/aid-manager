@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+     role="img" aria-labelledby="title desc">
+  <title id="title">AID Manager</title>
+  <desc id="desc">File with code braces icon for VS Code activity bar</desc>
+
+  <!-- File with folded corner -->
+  <path d="M7 3h6l4 4v10c0 2.2-1.8 4-4 4H7c-2.2 0-4-1.8-4-4V7c0-2.2 1.8-4 4-4z"/>
+  <path d="M13 3v5h5"/>
+
+  <!-- Code braces -->
+  <path d="M9.2 10.5l-2 2l2 2M14.8 10.5l2 2l-2 2"/>
+
+  <!-- Small spark to hint “automation/AI” -->
+  <g stroke="currentColor">
+    <path d="M17.5 8.2v1.2M16.9 8.8h1.2M17.5 7.2v0M16.1 8.2l.85.85M18.0 9.0l.85.85" />
+  </g>
+</svg>

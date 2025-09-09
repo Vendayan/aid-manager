@@ -1,0 +1,209 @@
+{
+  "name": "aid-manager",
+  "displayName": "AI Dungeon Script Manager",
+  "publisher": "Vendayan",
+  "description": "Manage AI Dungeon scenarios and scripts",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onViewContainer:aid-manager"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aid-manager",
+          "title": "AI Dungeon",
+          "icon": "resources/aid-explorer.svg"
+        }
+      ]
+    },
+    "views": {
+      "aid-manager": [
+        {
+          "id": "aid-manager.scenarios",
+          "name": "Scenarios",
+          "icon": "resources/aid-explorer.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aid-manager.scenarios",
+        "contents": "Sign in to load your AI Dungeon scenarios.\n\n[Sign In](command:aid-manager.signIn)  ·  [Open Settings](command:workbench.action.openSettings?%22aid-manager%22)",
+        "when": "!aid-manager.isAuthed"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aid-manager.signIn",
+        "title": "Sign In"
+      },
+      {
+        "command": "aid-manager.signOut",
+        "title": "Sign Out"
+      },
+      {
+        "command": "aid-manager.refresh",
+        "title": "Refresh"
+      },
+      {
+        "command": "aid-manager.openScript",
+        "title": "Open Script",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "aid-manager.saveScriptLocal",
+        "title": "Save Script Locally",
+        "icon": "$(save)"
+      },
+      {
+        "command": "aid-manager.saveCurrentAs",
+        "title": "Save As (Local Copy)"
+      },
+      {
+        "command": "aid-manager.exportScenarioScripts",
+        "title": "Export…",
+        "icon": "$(extensions-install-local-in-remote)"
+      },
+      {
+        "command": "aid-manager.refreshScenario",
+        "title": "Refresh Scenario…",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aid-manager.loadMoreScenarios",
+        "title": "Load More…"
+      },
+      {
+        "command": "aid-manager.openScenarioJson",
+        "title": "Open Scenario as JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "aid-manager.openScenarioForm",
+        "title": "Open Scenario Form",
+        "icon": "$(default-view-icon)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "aid-manager.openScript", "when": "never" },
+        { "command": "aid-manager.saveScriptLocal", "when": "never" },
+        { "command": "aid-manager.exportScenarioScripts", "when": "never" },
+        { "command": "aid-manager.signIn", "when": "never" },
+        { "command": "aid-manager.loadMoreScenarios", "when": "never" },
+        {
+          "command": "aid-manager.saveCurrentAs",
+          "when": "activeEditorIsEditor && resourceScheme == aid"
+        },
+        { "command": "aid-manager.openScenarioJson", "when": "never" },
+        { "command": "aid-manager.openScenarioForm", "when": "never" }
+      ],
+      "view/title": [
+        {
+          "command": "aid-manager.refresh",
+          "when": "view == aid-manager.scenarios && aid-manager.isAuthed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aid-manager.signOut",
+          "when": "view == aid-manager.scenarios && aid-manager.isAuthed",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aid-manager.saveScriptLocal",
+          "when": "view == aid-manager.scenarios && viewItem == script",
+          "group": "inline@2",
+          "icon": "$(save)"
+        },
+        {
+          "command": "aid-manager.exportScenarioScripts",
+          "when": "view == aid-manager.scenarios && viewItem == scenario.leaf",
+          "group": "inline@1",
+          "icon": "$(extensions-install-local-in-remote)"
+        },
+        {
+          "command": "aid-manager.refreshScenario",
+          "when": "view == aid-manager.scenarios && viewItem =~ /^scenario/",
+          "group": "inline@0",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "aid-manager.openScenarioJson",
+          "when": "view == aid-manager.scenarios && viewItem =~ /^scenario/",
+          "group": "inline@2",
+          "icon": "$(json)"
+        },
+        {
+          "command": "aid-manager.openScenarioForm",
+          "when": "view == aid-manager.scenarios && viewItem =~ /^scenario/",
+          "group": "inline@3",
+          "icon": "$(default-view-icon)"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "AI Dungeon Manager",
+        "properties": {
+          "aid-manager.userName": {
+            "type": "string",
+            "default": "",
+            "description": "Your AIDungeon Username (Required)"
+          },
+          "aid-manager.AIDEndpoint": {
+            "type": "string",
+            "default": "https://api.aidungeon.com/graphql",
+            "description": "GraphQL endpoint for AI Dungeon API."
+          },
+          "aid-manager.firebaseApiKey": {
+            "type": "string",
+            "default": "AIzaSyCnvo_XFPmAabrDkOKBRpbivp5UH8r_3mg",
+            "description": "Public Firebase API key (Don't change)"
+          },
+          "aid-manager.authHeaderName": {
+            "type": "string",
+            "default": "Authorization",
+            "description": "HTTP header name for authentication token. (Don't change)"
+          },
+          "aid-manager.authHeaderFormat": {
+            "type": "string",
+            "default": "firebase ${token}",
+            "description": "Format for the authentication header value. (Don't change)"
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.10",
+    "@types/vscode": "^1.102.0",
+    "@typescript-eslint/eslint-plugin": "^8.39.0",
+    "@typescript-eslint/parser": "^8.39.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.32.0",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "graphql": "^16.11.0"
+  }
+}
