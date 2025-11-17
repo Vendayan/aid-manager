@@ -24,17 +24,65 @@ async function readText(context: vscode.ExtensionContext, relPath: string): Prom
 export class ScenarioService {
   private lastScenarioEditedAt = new Map<string, string | null>();
   private lastScriptsHash = new Map<string, string | null>();
+  private scenarioStateMeta = new Map<string, { storyCardInstructions: string; storyCardStoryInformation: string; }>();
+  private scenarioOverrides = new Map<string, any>();
+  private webviewStateWaiters = new WeakMap<vscode.Webview, Map<string, { resolve: (value: any) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>>();
 
   public constructor(private client: AIDClient) { }
 
+  private cloneModel<T>(model: T): T {
+    return JSON.parse(JSON.stringify(model));
+  }
+
+  public setLocalScenarioOverride(shortId: string, model: any): void {
+    const clone = this.cloneModel(model ?? {});
+    this.scenarioOverrides.set(shortId, clone);
+    this.rememberScenarioState(shortId, clone);
+  }
+
+  public clearLocalScenarioOverride(shortId: string): void {
+    this.scenarioOverrides.delete(shortId);
+  }
+
+  public async applyScenarioJsonText(shortId: string, jsonText: string): Promise<void> {
+    try {
+      const parsed = JSON.parse(jsonText);
+      this.setLocalScenarioOverride(shortId, parsed);
+    } catch (err: any) {
+      throw new Error(`Scenario JSON must be valid JSON: ${err?.message ?? err}`);
+    }
+  }
+
+  public applyScenarioStateSnapshot(shortId: string, snapshot: { model: any; storyCards?: any[] }): void {
+    const model = snapshot?.model ? this.cloneModel(snapshot.model) : {};
+    if (Array.isArray(snapshot?.storyCards)) {
+      model.storyCards = this.cloneModel(snapshot.storyCards);
+    }
+    this.setLocalScenarioOverride(shortId, model);
+  }
+
   public async getEditorJson(shortId: string): Promise<any> {
+    const override = this.scenarioOverrides.get(shortId);
+    if (override) {
+      const clone = this.cloneModel(override);
+      this.rememberScenarioState(shortId, clone);
+      return clone;
+    }
     const raw = await this.fetchScenario(shortId);
-    return this.normalizeEditorJson(raw);
+    const normalized = this.normalizeEditorJson(raw);
+    this.rememberScenarioState(shortId, normalized);
+    return normalized;
   }
 
   public async getExportJson(shortId: string): Promise<any> {
+    const override = this.scenarioOverrides.get(shortId);
+    if (override) {
+      return this.cloneModel(override);
+    }
     const raw = await this.fetchScenario(shortId);
-    return this.normalizeExportJson(raw);
+    const normalized = this.normalizeExportJson(raw);
+    this.rememberScenarioState(shortId, normalized);
+    return normalized;
   }
 
   // multipleChoice = container (no scripts). Others are leaves.
@@ -189,6 +237,11 @@ export class ScenarioService {
     vscode.window.showInformationMessage(`Exported scripts and scenario.json for “${scenarioTitle}”.`);
   }
 
+  /**
+   * Returns true when the server reports a different `editedAt` or script hash than
+   * the last refresh. The refresh command uses this to decide whether it must close
+   * local editors to avoid overwriting newer server content.
+   */
   public async shouldPurgeOnRefresh(shortId: string): Promise<boolean> {
     try {
       const serverScenario = await this.fetchScenario(shortId);
@@ -219,30 +272,35 @@ export class ScenarioService {
   // ---------- Webview shell from resources ----------
 
   public async renderEditorUI(context: vscode.ExtensionContext, webview: vscode.Webview): Promise<string> {
-    // Load the HTML template that contains the placeholders: %CSP%, %CSS_URI%, %MAIN_URI%
-    const htmlTpl = await readText(context, "media/scenario/scenarioView.html");
+    const distRoot = vscode.Uri.joinPath(context.extensionUri, "media", "scenario", "dist");
+    let html = await readText(context, "media/scenario/dist/index.html");
 
-    // Entry points that must be served via asWebviewUri
-    const cssUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(context.extensionUri, "media", "scenario", "scenarioView.css") // exact filename/case
-    );
-    const mainUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(context.extensionUri, "media", "scenario", "scenario-editor.js") // root module under /scenario
-    );
-
-    // CSP: allow the VS Code webview origin for scripts/styles; allow inline <style> in custom elements;
-    // allow https/data images and the webview origin (for data URLs or extension-served assets).
     const csp = [
       "default-src 'none';",
       `img-src ${webview.cspSource} https: data:;`,
       `style-src ${webview.cspSource} 'unsafe-inline';`,
-      `script-src ${webview.cspSource};`
+      `script-src ${webview.cspSource};`,
+      `font-src ${webview.cspSource};`
     ].join(" ");
 
-    return htmlTpl
-      .replace(/%CSP%/g, csp)
-      .replace(/%CSS_URI%/g, cssUri.toString())
-      .replace(/%JS_URI%/g, mainUri.toString());
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${cspMeta}</head>`);
+    } else {
+      html = cspMeta + html;
+    }
+
+    const assetRegex = /(src|href)="([^"]+)"/g;
+    const toUri = (assetPath: string): string => {
+      if (/^https?:/i.test(assetPath) || assetPath.startsWith("data:") || assetPath.startsWith("vscode-webview://")) {
+        return assetPath;
+      }
+      const normalized = assetPath.replace(/^\/+/, "").replace(/^\.\//, "");
+      const assetUri = webview.asWebviewUri(vscode.Uri.joinPath(distRoot, normalized));
+      return assetUri.toString();
+    };
+
+    return html.replace(assetRegex, (_match, attr, value) => `${attr}="${toUri(value)}"`);
   }
 
   // ---------- Normalization ----------
@@ -254,6 +312,7 @@ export class ScenarioService {
     const base = this.baseScenarioFields(model);
     base.options = this.shallowOptions(model);
     base.storyCards = this.storyCards(model);
+    base.state = this.stateFields(model);
     base.published = model.published ?? false;
     base.unlisted = model.unlisted ?? false;
     base.allowComments = model.allowComments ?? true;
@@ -273,6 +332,7 @@ export class ScenarioService {
     const base = this.baseScenarioFields(model);
     base.options = this.shallowOptions(model);
     base.storyCards = this.storyCards(model);
+    base.state = this.stateFields(model);
     base.published = model.published ?? false;
     base.unlisted = model.unlisted ?? false;
     base.contentType = model.contentType ?? "Unrated";
@@ -310,6 +370,19 @@ export class ScenarioService {
           title: model.parentScenario.title
         }
         : null
+    };
+  }
+
+  private stateFields(model: any): any {
+    const state = model?.state ?? {};
+    return {
+      scenarioId: state?.scenarioId ?? null,
+      type: state?.type ?? null,
+      storySummary: state?.storySummary ?? "",
+      storyCardInstructions: state?.storyCardInstructions ?? "",
+      storyCardStoryInformation: state?.storyCardStoryInformation ?? "",
+      scenarioStateVersion: state?.scenarioStateVersion ?? null,
+      instructions: state?.instructions ?? {}
     };
   }
 
@@ -358,6 +431,17 @@ export class ScenarioService {
     return storyCards;
   }
 
+  private rememberScenarioState(shortId: string, normalized: any): void {
+    const state = normalized?.state;
+    if (!state) {
+      return;
+    }
+    this.scenarioStateMeta.set(shortId, {
+      storyCardInstructions: state.storyCardInstructions ?? "",
+      storyCardStoryInformation: state.storyCardStoryInformation ?? ""
+    });
+  }
+
   private async fileExists(uri: vscode.Uri): Promise<boolean> {
     try {
       await vscode.workspace.fs.stat(uri);
@@ -382,8 +466,7 @@ export class ScenarioService {
   }
 
   public async sendScenarioInit(webview: vscode.Webview, shortId: string): Promise<void> {
-    const raw = await this.fetchScenario(shortId);
-    const model = this.normalizeEditorJson(raw);
+    const model = await this.getEditorJson(shortId);
 
     // Plot components may require a details call; handle best-effort.
     const plotComponents = await this.getPlotComponentsSafe(shortId);
@@ -403,38 +486,72 @@ export class ScenarioService {
    * Wires message handlers for the scenario editor webview.
    * Returns a Disposable; call .dispose() when the panel closes.
    */
-  public attachWebviewHandlers(webview: vscode.Webview, shortId: string): vscode.Disposable {
+  public attachWebviewHandlers(
+    webview: vscode.Webview,
+    shortId: string,
+    opts?: { onDirtyChange?: (dirty: boolean) => void }
+  ): vscode.Disposable {
+    const pending = new Map<string, { resolve: (value: any) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
+    this.webviewStateWaiters.set(webview, pending);
     const sub = webview.onDidReceiveMessage(async (msg: any) => {
       try {
         switch (msg?.type) {
+          case "scenario:ready": {
+            await this.sendScenarioInit(webview, shortId);
+            break;
+          }
           case "scenario:dirty": {
-            // You said persistence comes later; for now we just acknowledge.
-            // If you want to log: vscode.window.setStatusBarMessage(`Changed ${msg.field}`, 1000);
+            if (typeof msg?.dirty === "boolean") {
+              opts?.onDirtyChange?.(!!msg.dirty);
+            }
+            break;
+          }
+          case "scenario:state": {
+            const reqId = typeof msg?.requestId === "string" ? msg.requestId : "";
+            if (!reqId) { break; }
+            const waiter = pending.get(reqId);
+            if (waiter) {
+              pending.delete(reqId);
+              clearTimeout(waiter.timer);
+              waiter.resolve(msg?.payload ?? {});
+            }
             break;
           }
 
           case "storycard:create": {
-            const created = await this.createStoryCardSafe(shortId);
-            if (created) {
-              const fresh = await this.getEditorJson(shortId);
-              webview.postMessage({
-                type: "storyCards:set",
-                storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
-              });
+            const payload = msg?.payload || {};
+            const created = await this.createStoryCardSafe(shortId, {
+              title: payload?.title,
+              type: payload?.type,
+              body: payload?.body,
+              description: payload?.description,
+              keys: payload?.keys,
+              useForCharacterCreation: payload?.useForCharacterCreation
+            });
+            if (!created) {
+              vscode.window.showWarningMessage("Failed to create story card. Please try again.");
+              break;
             }
+            const fresh = await this.getEditorJson(shortId);
+            webview.postMessage({
+              type: "storyCards:set",
+              storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
+            });
             break;
           }
 
           case "storycard:delete": {
             if (!msg?.id) { break; }
-            const ok = await this.deleteStoryCardSafe(msg.id);
-            if (ok) {
-              const fresh = await this.getEditorJson(shortId);
-              webview.postMessage({
-                type: "storyCards:set",
-                storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
-              });
+            const ok = await this.deleteStoryCardSafe(shortId, msg.id);
+            if (!ok) {
+              vscode.window.showWarningMessage("Failed to delete story card. Please try again.");
+              break;
             }
+            const fresh = await this.getEditorJson(shortId);
+            webview.postMessage({
+              type: "storyCards:set",
+              storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
+            });
             break;
           }
 
@@ -451,15 +568,29 @@ export class ScenarioService {
               delete apiPatch.body;
             }
 
-            const ok = await this.updateStoryCardSafe(id, apiPatch);
+            const ok = await this.updateStoryCardSafe(shortId, id, apiPatch);
             if (!ok) {
-              vscode.window.showWarningMessage("Failed to update story card (API method not available).");
+              vscode.window.showWarningMessage("Failed to update story card.");
             }
             break;
           }
-
-          case "storycard:focus": {
-            // FYI-only; no-op here unless you want to highlight something host-side.
+          case "scenario:save": {
+            try {
+              const snapshot = msg?.payload ?? {};
+              const saved = await this.saveScenarioSnapshot(shortId, snapshot);
+              webview.postMessage({
+                type: "scenario:saved",
+                model: saved,
+                storyCards: this.mapStoryCardsForWebview(saved?.storyCards ?? [])
+              });
+              opts?.onDirtyChange?.(false);
+            } catch (err: any) {
+              webview.postMessage({
+                type: "scenario:save:error",
+                message: err?.message ?? String(err)
+              });
+              vscode.window.showErrorMessage(`Failed to save scenario: ${err?.message ?? err}`);
+            }
             break;
           }
 
@@ -473,18 +604,48 @@ export class ScenarioService {
       }
     });
 
-    return sub;
+    return new vscode.Disposable(() => {
+      sub.dispose();
+      this.webviewStateWaiters.delete(webview);
+      for (const [key, waiter] of pending.entries()) {
+        pending.delete(key);
+        clearTimeout(waiter.timer);
+        waiter.reject(new Error("Scenario editor closed before responding."));
+      }
+    });
+  }
+
+  public async requestScenarioState(webview: vscode.Webview): Promise<{ model: any; storyCards?: any[] }> {
+    const pending = this.webviewStateWaiters.get(webview);
+    if (!pending) {
+      throw new Error("Scenario editor is not ready.");
+    }
+    const requestId = Math.random().toString(36).slice(2);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error("Timed out waiting for scenario state."));
+      }, 5000);
+      pending.set(requestId, {
+        resolve: (value) => resolve(value),
+        reject,
+        timer
+      });
+      webview.postMessage({ type: "scenario:requestState", requestId });
+    });
   }
 
   /* ---------- helpers ---------- */
 
-  private mapStoryCardsForWebview(items: any[]): Array<{ id: string; title: string; type: string; keys: string; body: string }> {
+  private mapStoryCardsForWebview(items: any[]): Array<{ id: string; title: string; type: string; keys: string; body: string; description: string; useForCharacterCreation: boolean }> {
     return (items || []).map((sc: any) => ({
       id: sc.id,
       title: sc.title ?? "",
       type: sc.type ?? "card",
       keys: sc.keys ?? "",
-      body: (sc.value ?? sc.description ?? "") as string
+      body: String(sc.value ?? ""),
+      description: String(sc.description ?? ""),
+      useForCharacterCreation: !!sc.useForCharacterCreation
     }));
   }
 
@@ -495,16 +656,15 @@ export class ScenarioService {
         return {};
       }
       const details = await anyClient.getScenarioDetails(shortId);
-      // Support a couple of possible shapes:
-      //  - { plotComponents: Array<{ type, text }> }
-      //  - { plotComponents: Record<string, { type, text }> }
       const out: Record<string, { type: string; text: string }> = {};
 
       const pcs = (details?.plotComponents ?? []) as any;
       if (Array.isArray(pcs)) {
         for (const pc of pcs) {
           const t = String(pc?.type ?? "").trim();
-          if (!t) { continue; }
+          if (!t) {
+            continue;
+          }
           out[t] = { type: t, text: String(pc?.text ?? "") };
         }
       } else if (pcs && typeof pcs === "object") {
@@ -519,18 +679,85 @@ export class ScenarioService {
     }
   }
 
+  public async saveScenarioSnapshot(shortId: string, snapshot: { model: any }): Promise<any> {
+    if (!snapshot?.model) {
+      throw new Error("Missing scenario data.");
+    }
+    const input = this.buildScenarioUpdateInput(shortId, snapshot.model);
+    await this.client.updateScenario(input);
+    const refreshed = await this.fetchScenario(shortId);
+    const normalized = this.normalizeEditorJson(refreshed);
+    this.setLocalScenarioOverride(shortId, normalized);
+    return normalized;
+  }
+
+  private buildScenarioUpdateInput(shortId: string, model: any): {
+    shortId: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+    memory?: string;
+    authorsNote?: string;
+    tags?: string[];
+    contentRating?: string | null;
+    allowComments?: boolean;
+    details?: Record<string, unknown>;
+  } {
+    const tags = Array.isArray(model?.tags)
+      ? model.tags.filter((tag: any) => typeof tag === "string").map((tag: string) => tag.trim())
+      : [];
+    const state = (model?.state && typeof model.state === "object") ? { ...model.state } : {};
+    const instructions = (state?.instructions && typeof state.instructions === "object")
+      ? { ...(state.instructions as Record<string, unknown>) }
+      : {};
+
+    return {
+      shortId,
+      title: model?.title ?? "",
+      description: model?.description ?? "",
+      prompt: model?.prompt ?? "",
+      memory: model?.memory ?? "",
+      authorsNote: model?.authorsNote ?? "",
+      tags,
+      contentRating: model?.contentRating ?? "Unrated",
+      allowComments: typeof model?.allowComments === "boolean" ? model.allowComments : undefined,
+      details: {
+        scenarioId: state?.scenarioId ?? model?.id ?? null,
+        instructions,
+        storySummary: state?.storySummary ?? "",
+        storyCardInstructions: state?.storyCardInstructions ?? "",
+        storyCardStoryInformation: state?.storyCardStoryInformation ?? ""
+      }
+    };
+  }
+
   /* These three wrappers call into AIDClient if the methods exist.
      They return false if the client doesn't support the operation. */
 
-  private async createStoryCardSafe(shortId: string): Promise<boolean> {
+  private getStoryCardContext(shortId: string): { storyCardInstructions: string; storyCardStoryInformation: string; } {
+    return this.scenarioStateMeta.get(shortId) ?? { storyCardInstructions: "", storyCardStoryInformation: "" };
+  }
+
+  private async createStoryCardSafe(shortId: string, initial?: { title?: string; type?: string; body?: string; description?: string; keys?: string; useForCharacterCreation?: boolean }): Promise<boolean> {
     try {
       const anyClient: any = this.client as any;
-      if (typeof anyClient.createStoryCardForScenario === "function") {
-        await anyClient.createStoryCardForScenario(shortId);
-        return true;
-      }
+      const meta = this.getStoryCardContext(shortId);
       if (typeof anyClient.createStoryCard === "function") {
-        await anyClient.createStoryCard({ shortId });
+        await anyClient.createStoryCard({
+          shortId,
+          contentType: "scenario",
+          type: initial?.type || "custom",
+          title: initial?.title || "New Story Card",
+          description: initial?.description ?? "",
+          keys: initial?.keys ?? "",
+          value: initial?.body ?? "",
+          useForCharacterCreation: initial?.useForCharacterCreation ?? true,
+          autoGenerate: false,
+          instructions: meta.storyCardInstructions,
+          storyInformation: meta.storyCardStoryInformation,
+          includeStorySummary: false,
+          temperature: 1
+        });
         return true;
       }
       return false;
@@ -539,13 +766,29 @@ export class ScenarioService {
     }
   }
 
-  private async updateStoryCardSafe(id: string, patch: any): Promise<boolean> {
+  private async updateStoryCardSafe(shortId: string, id: string, patch: any): Promise<boolean> {
     try {
       const anyClient: any = this.client as any;
       if (typeof anyClient.updateStoryCard === "function") {
-        // Try common signatures
-        try { await anyClient.updateStoryCard(id, patch); return true; } catch { }
-        try { await anyClient.updateStoryCard({ id, ...patch }); return true; } catch { }
+        const payload = {
+          id,
+          shortId,
+          contentType: "scenario",
+          type: patch.type,
+          title: patch.title,
+          description: patch.description ?? "",
+          keys: patch.keys,
+          value: patch.value ?? "",
+          useForCharacterCreation: typeof patch.useForCharacterCreation === "boolean"
+            ? patch.useForCharacterCreation
+            : undefined
+        };
+        try {
+          await anyClient.updateStoryCard(payload);
+          return true;
+        } catch {
+          // ignore and fall through
+        }
       }
       return false;
     } catch {
@@ -553,11 +796,11 @@ export class ScenarioService {
     }
   }
 
-  private async deleteStoryCardSafe(id: string): Promise<boolean> {
+  private async deleteStoryCardSafe(shortId: string, id: string): Promise<boolean> {
     try {
       const anyClient: any = this.client as any;
       if (typeof anyClient.deleteStoryCard === "function") {
-        await anyClient.deleteStoryCard(id);
+        await anyClient.deleteStoryCard({ id, shortId, contentType: "scenario" });
         return true;
       }
       if (typeof anyClient.removeStoryCard === "function") {

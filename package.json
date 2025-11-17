@@ -185,12 +185,14 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run build:webview && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "build:webview": "npm --prefix webview-ui run build",
+    "dev:webview": "npm --prefix webview-ui run dev"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -200,10 +202,10 @@
     "@typescript-eslint/parser": "^8.39.0",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.32.0",
-    "typescript": "^5.9.2"
+    "eslint": "^9.32.0"
   },
   "dependencies": {
-    "graphql": "^16.11.0"
+    "graphql": "^16.11.0",
+    "typescript": "^5.9.2"
   }
 }

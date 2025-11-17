@@ -292,6 +292,16 @@ export class AIDClient {
             deletedAt
             __typename
           }
+          state(viewPublished: false) {
+            scenarioId
+            type
+            storySummary
+            storyCardInstructions
+            storyCardStoryInformation
+            scenarioStateVersion
+            instructions
+            __typename
+          }
           __typename
         }
       }`;
@@ -396,5 +406,260 @@ export class AIDClient {
       throw new Error(payload?.message || "updateScenarioScripts failed");
     }
     return payload;
+  }
+
+  private ensureStoryCardContentType(contentType?: string): string {
+    const normalized = (contentType || "scenario").toLowerCase();
+    return normalized === "adventure" ? "adventure" : "scenario";
+  }
+
+  private randomStoryCardId(): string {
+    return Math.floor(Math.random() * 1_000_000_000).toString();
+  }
+
+  async createStoryCard(input: {
+    shortId: string;
+    contentType?: string;
+    id?: string;
+    type?: string;
+    title?: string;
+    description?: string;
+    keys?: string;
+    value?: string;
+    useForCharacterCreation?: boolean;
+    autoGenerate?: boolean;
+    instructions?: string;
+    storyInformation?: string;
+    temperature?: number;
+    includeStorySummary?: boolean;
+  }): Promise<any> {
+    const payload = {
+      id: input.id ?? this.randomStoryCardId(),
+      shortId: input.shortId,
+      contentType: this.ensureStoryCardContentType(input.contentType),
+      type: input.type ?? "card",
+      title: input.title ?? "",
+      description: input.description ?? "",
+      keys: input.keys ?? "",
+      value: input.value ?? "",
+      useForCharacterCreation: input.useForCharacterCreation ?? true,
+      autoGenerate: input.autoGenerate ?? false,
+      instructions: input.instructions ?? "",
+      storyInformation: input.storyInformation ?? "",
+      temperature: typeof input.temperature === "number" ? input.temperature : 1,
+      includeStorySummary: input.includeStorySummary ?? false,
+    };
+
+    const query = `
+      mutation CreateStoryCard($input: CreateStoryCardInput!) {
+        createStoryCard(input: $input) {
+          success
+          message
+          storyCard {
+            id
+            type
+            title
+            description
+            keys
+            value
+            useForCharacterCreation
+            updatedAt
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+
+    type Resp = {
+      createStoryCard?: {
+        success: boolean;
+        message?: string | null;
+        storyCard?: any;
+      } | null;
+    };
+
+    const res = await this.gql<Resp>({
+      query,
+      variables: { input: payload },
+      operationName: "CreateStoryCard"
+    });
+
+    if (!res?.createStoryCard?.success) {
+      throw new Error(res?.createStoryCard?.message || "createStoryCard failed");
+    }
+    return res.createStoryCard.storyCard;
+  }
+
+  async updateStoryCard(input: {
+    id: string;
+    shortId: string;
+    contentType?: string;
+    type?: string;
+    title?: string;
+    description?: string;
+    keys?: string;
+    value?: string;
+    useForCharacterCreation?: boolean;
+  }): Promise<any> {
+    const payload = {
+      id: input.id,
+      shortId: input.shortId,
+      contentType: this.ensureStoryCardContentType(input.contentType),
+      type: input.type ?? "card",
+      title: input.title ?? "",
+      description: input.description ?? input.value ?? "",
+      keys: input.keys ?? "",
+      value: input.value ?? "",
+      useForCharacterCreation: input.useForCharacterCreation ?? true
+    };
+
+    const query = `
+      mutation UpdateStoryCard($input: UpdateStoryCardInput!) {
+        updateStoryCard(input: $input) {
+          success
+          message
+          storyCard {
+            id
+            type
+            title
+            description
+            keys
+            value
+            useForCharacterCreation
+            updatedAt
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+
+    type Resp = {
+      updateStoryCard?: {
+        success: boolean;
+        message?: string | null;
+        storyCard?: any;
+      } | null;
+    };
+
+    const res = await this.gql<Resp>({
+      query,
+      variables: { input: payload },
+      operationName: "UpdateStoryCard"
+    });
+
+    if (!res?.updateStoryCard?.success) {
+      throw new Error(res?.updateStoryCard?.message || "updateStoryCard failed");
+    }
+    return res.updateStoryCard.storyCard;
+  }
+
+  async deleteStoryCard(input: { id: string; shortId: string; contentType?: string; }): Promise<void> {
+    const payload = {
+      id: input.id,
+      shortId: input.shortId,
+      contentType: this.ensureStoryCardContentType(input.contentType)
+    };
+
+    const query = `
+      mutation DeleteStoryCard($input: DeleteStoryCardInput!) {
+        deleteStoryCard(input: $input) {
+          success
+          message
+          __typename
+        }
+      }
+    `;
+
+    type Resp = {
+      deleteStoryCard?: {
+        success: boolean;
+        message?: string | null;
+      } | null;
+    };
+
+    const res = await this.gql<Resp>({
+      query,
+      variables: { input: payload },
+      operationName: "DeleteStoryCard"
+    });
+
+    if (!res?.deleteStoryCard?.success) {
+      throw new Error(res?.deleteStoryCard?.message || "deleteStoryCard failed");
+    }
+  }
+
+  async updateScenario(input: {
+    shortId: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+    memory?: string;
+    authorsNote?: string;
+    tags?: string[];
+    contentRating?: string | null;
+    allowComments?: boolean;
+    details?: Record<string, unknown> | null;
+  }): Promise<any> {
+    const payload = {
+      ...input,
+      tags: Array.isArray(input.tags) ? input.tags : undefined,
+      details: input.details ?? undefined
+    };
+
+    const query = `
+      mutation UpdateScenario($input: ScenarioInput) {
+        updateScenario(input: $input) {
+          success
+          code
+          message
+          scenario {
+            id
+            shortId
+            title
+            description
+            prompt
+            memory
+            authorsNote
+            tags
+            contentRating
+            allowComments
+            editedAt
+            createdAt
+            publicId
+            state(viewPublished: false) {
+              scenarioId
+              type
+              storySummary
+              storyCardInstructions
+              storyCardStoryInformation
+              scenarioStateVersion
+              instructions
+            }
+          }
+        }
+      }
+    `;
+
+    type Resp = {
+      updateScenario?: {
+        success: boolean;
+        code?: number | null;
+        message?: string | null;
+        scenario?: any;
+      } | null;
+    };
+
+    const res = await this.gql<Resp>({
+      query,
+      variables: { input: payload },
+      operationName: "UpdateScenario"
+    });
+
+    if (!res?.updateScenario?.success) {
+      throw new Error(res?.updateScenario?.message || "updateScenario failed");
+    }
+    return res.updateScenario.scenario ?? {};
   }
 }

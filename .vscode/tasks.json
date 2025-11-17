@@ -4,6 +4,13 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "build:webview",
+			"type": "shell",
+			"command": "npm run build:webview",
+			"problemMatcher": []
+		},
+		{
+			"label": "watch-extension",
 			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",
@@ -11,10 +18,20 @@
 			"presentation": {
 				"reveal": "never"
 			},
+			"group": "none"
+		},
+		{
+			"label": "build-all",
+			"dependsOn": [
+				"build:webview",
+				"watch-extension"
+			],
+			"dependsOrder": "sequence",
 			"group": {
 				"kind": "build",
 				"isDefault": true
-			}
+			},
+			"problemMatcher": []
 		}
 	]
 }

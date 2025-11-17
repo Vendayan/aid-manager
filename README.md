@@ -23,10 +23,17 @@ This extension contributes the following settings:
 
 ## Known Issues
 
-So many, but the biggest one is the dev.
-
 ## Release Notes
 
 ### 1.0.0
 
-Initial release
+Initial
+
+## Webview UI
+
+The scenario editor webview is now built with React. The source lives under `webview-ui/`.
+
+- `npm run build:webview` – build the production assets into `media/scenario/dist` (automatically run before publishing).
+- `npm run dev:webview` – start Vite in watch mode for rapid iteration inside the browser (useful for UI tweaks before syncing to VS Code).
+
+The built assets are packaged with the extension, so make sure to re-run `npm run build:webview` whenever you update the React UI.

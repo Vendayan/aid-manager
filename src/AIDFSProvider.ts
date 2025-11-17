@@ -9,6 +9,7 @@ export type RemoteSaveFn = (args: {
 }) => Promise<void>;
 
 type ScenarioJsonReader = (shortId: string) => Promise<Buffer>;
+type ScenarioJsonWriter = (shortId: string, content: Uint8Array) => Promise<void>;
 
 type ScriptSnapshot = {
   sharedLibrary: string | null;
@@ -17,12 +18,19 @@ type ScriptSnapshot = {
   onModelContext: string | null;
 };
 
+/**
+ * Implements the read/write surface behind the `aid:` virtual scheme.
+ * Script files are cached per scenario in `snapshots` so concurrent editors
+ * can reuse fetched text; callers must explicitly clear the cache when they
+ * know the server data changed (e.g. refresh command or after an export).
+ */
 export class AidFsProvider implements vscode.FileSystemProvider {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = this._emitter.event;
 
   private remoteSave: RemoteSaveFn;
   private scenarioJsonReader: ScenarioJsonReader;
+  private scenarioJsonWriter?: ScenarioJsonWriter;
 
   private snapshots = new Map<string, ScriptSnapshot>();
 
@@ -43,6 +51,11 @@ export class AidFsProvider implements vscode.FileSystemProvider {
     this.scenarioJsonReader = fn;
   }
 
+  public setScenarioJsonWriter(fn: ScenarioJsonWriter) {
+    this.scenarioJsonWriter = fn;
+  }
+
+  /** Replace the cached snapshot and notify all virtual files for the scenario. */
   public applyServerSnapshot(shortId: string, snap: ScriptSnapshot): void {
     this.snapshots.set(shortId, {
       sharedLibrary: snap.sharedLibrary ?? null,
@@ -58,6 +71,21 @@ export class AidFsProvider implements vscode.FileSystemProvider {
       events.push({ type: vscode.FileChangeType.Changed, uri });
     }
     if (events.length > 0) {
+      this._emitter.fire(events);
+    }
+  }
+
+  /** Drop cached state so the next read hits GraphQL again. */
+  public clearSnapshot(shortId: string): void {
+    if (!this.snapshots.delete(shortId)) {
+      return;
+    }
+    const events: vscode.FileChangeEvent[] = [];
+    for (const ev of ["sharedLibrary", "onInput", "onOutput", "onModelContext"] as ScriptEvent[]) {
+      const uri = vscode.Uri.from({ scheme: "aid", path: `/scenario/${shortId}/${ev}.js` });
+      events.push({ type: vscode.FileChangeType.Changed, uri });
+    }
+    if (events.length) {
       this._emitter.fire(events);
     }
   }
@@ -150,12 +178,18 @@ export class AidFsProvider implements vscode.FileSystemProvider {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
 
+    const shortId = parts[1];
+
     if (this.isScenarioJsonPath(parts)) {
-      vscode.window.showWarningMessage("Remote scenario save is not implemented yet. Use 'Save As' to export locally.");
-      throw vscode.FileSystemError.NoPermissions("Remote scenario save not implemented.");
+      if (!this.scenarioJsonWriter) {
+        vscode.window.showWarningMessage("Remote scenario save is not implemented yet. Use 'Save As' to export locally.");
+        throw vscode.FileSystemError.NoPermissions("Remote scenario save not implemented.");
+      }
+      await this.scenarioJsonWriter(shortId, content);
+      this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri }]);
+      return;
     }
 
-    const shortId = parts[1];
     const resource = parts[2];
     const event = resource.replace(/\.js$/i, "") as ScriptEvent;
     if (!["sharedLibrary", "onInput", "onOutput", "onModelContext"].includes(event)) {

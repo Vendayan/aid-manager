@@ -39,6 +39,7 @@ Thumbs.db
 
 # Test coverage
 coverage/
+.vscode-test/
 
 # npm cache
 .npm/

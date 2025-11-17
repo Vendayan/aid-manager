@@ -1,0 +1,350 @@
+:root {
+  font-family: var(--vscode-font-family, "Segoe UI"), system-ui, -apple-system, sans-serif;
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-editor-background);
+}
+
+body {
+  margin: 0;
+  background: var(--vscode-editor-background);
+}
+
+#root {
+  min-height: 100vh;
+  background: var(--vscode-editor-background);
+}
+
+.app {
+  color: var(--vscode-foreground);
+}
+
+.app-header {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--vscode-widget-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+  z-index: 5;
+}
+
+.header-title {
+  flex: 1;
+}
+
+.header-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.save-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 0.25rem;
+}
+
+.chips {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chip {
+  background: transparent;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-widget-border);
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.status.dirty {
+  border-color: var(--vscode-inputValidationWarningBorder, #d7ba7d);
+  color: var(--vscode-inputValidationWarningForeground, #d7ba7d);
+}
+
+.content {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.card {
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.1);
+}
+
+.section-title {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+}
+
+.section-heading .title {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+}
+
+.section-heading .subtitle {
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.details-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.field span {
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.input {
+  border-radius: 8px;
+  border: 1px solid var(--vscode-widget-border);
+  background: var(--vscode-input-background, #1f1f1f);
+  color: var(--vscode-foreground);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.95rem;
+  width: 100%;
+}
+
+.textarea {
+  min-height: 120px;
+  resize: none;
+}
+
+.tag-list,
+.tags-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.tag {
+  border-radius: 999px;
+  border: 1px solid var(--vscode-widget-border);
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.tag.editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tag-remove {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.tag-input-group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.tag-input {
+  min-width: 140px;
+}
+
+.muted {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.9rem;
+}
+
+.muted.small {
+  font-size: 0.75rem;
+  margin: 0 0 0.5rem;
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--vscode-widget-border);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.btn {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: var(--vscode-widget-border);
+  color: var(--vscode-foreground);
+}
+
+.storycard-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.storycard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  align-items: center;
+}
+
+.storycard-search {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.checkbox.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.checkbox.inline input {
+  margin: 0;
+}
+
+.input-error {
+  color: var(--vscode-inputValidationErrorForeground, #f14c4c);
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.storycard-virtual-container {
+  width: 100%;
+}
+
+.storycard {
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--vscode-editor-background);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.storycard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.storycard-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.storycard-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.plot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.plot-card {
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+
+.empty-state {
+  padding: 4rem 2rem;
+  text-align: center;
+}
