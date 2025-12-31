@@ -10,10 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "aid-manager": "file:..",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-window": "^1.8.11",
-    "react-virtuoso": "^4.7.10"
+    "react-virtuoso": "^4.7.10",
+    "react-window": "^1.8.11"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

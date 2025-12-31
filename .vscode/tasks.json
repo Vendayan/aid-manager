@@ -4,6 +4,12 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "ensure-deps",
+			"type": "npm",
+			"script": "ensure:deps",
+			"problemMatcher": []
+		},
+		{
 			"label": "build:webview",
 			"type": "shell",
 			"command": "npm run build:webview",
@@ -23,6 +29,7 @@
 		{
 			"label": "build-all",
 			"dependsOn": [
+				"ensure-deps",
 				"build:webview",
 				"watch-extension"
 			],

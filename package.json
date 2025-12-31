@@ -10,6 +10,9 @@
   "categories": [
     "Other"
   ],
+  "workspaces": [
+    "webview-ui"
+  ],
   "main": "./out/extension.js",
   "activationEvents": [
     "onViewContainer:aid-manager"
@@ -192,7 +195,8 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "build:webview": "npm --prefix webview-ui run build",
-    "dev:webview": "npm --prefix webview-ui run dev"
+    "dev:webview": "npm --prefix webview-ui run dev",
+    "ensure:deps": "node ./scripts/ensure-deps.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

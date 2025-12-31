@@ -6,6 +6,12 @@ VS Code extension for editing scripts related to AI Dungeon.
 
 Itemizes scenarios into a treeview allowing easier access to manage scripts.
 
+## Getting Started
+
+1. Press `F5` — the default launch runs `npm run ensure:deps` to install missing deps, then builds and starts the extension.
+2. Optional: run `npm run ensure:deps` manually if you want to install before launching.
+3. Build the webview UI with `npm run build:webview` (run automatically during publish).
+
 ## Requirements
 
 VS Code version 1.102 or later
@@ -33,7 +39,7 @@ Initial
 
 The scenario editor webview is now built with React. The source lives under `webview-ui/`.
 
-- `npm run build:webview` – build the production assets into `media/scenario/dist` (automatically run before publishing).
-- `npm run dev:webview` – start Vite in watch mode for rapid iteration inside the browser (useful for UI tweaks before syncing to VS Code).
+- `npm run build:webview` — build the production assets into `media/scenario/dist` (automatically run before publishing).
+- `npm run dev:webview` — start Vite in watch mode for rapid iteration inside the browser (useful for UI tweaks before syncing to VS Code).
 
 The built assets are packaged with the extension, so make sure to re-run `npm run build:webview` whenever you update the React UI.
