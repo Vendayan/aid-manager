@@ -13,6 +13,7 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   // ---- root pagination state ----
   private pageSize = 100;
   private rootItems: Scenario[] = [];
+  private pinned: Scenario[] = [];
   private rootOffset = 0;
   private rootEnded = false;
   private rootLoading = false;
@@ -45,6 +46,24 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
     this.scenarioInfoCache.clear();
     this.nodeMetaCache.clear();
     this._onDidChange.fire(undefined);
+  }
+
+  addPinnedScenario(s: Scenario) {
+    const idx = this.pinned.findIndex(p => p.shortId === s.shortId);
+    if (idx >= 0) {
+      this.pinned[idx] = s;
+    } else {
+      this.pinned.unshift(s);
+    }
+    this._onDidChange.fire(undefined);
+  }
+
+  removePinned(shortId: string) {
+    const idx = this.pinned.findIndex(p => p.shortId === shortId);
+    if (idx >= 0) {
+      this.pinned.splice(idx, 1);
+      this._onDidChange.fire(undefined);
+    }
   }
 
   async loadMoreRoot(): Promise<void> {
@@ -100,7 +119,7 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   getTreeItem(el: vscode.TreeItem) { return el; }
 
   async getChildren(el?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-    // Don’t hit the API if auth isn’t valid. This never prompts.
+    // Don't hit the API if auth isn't valid. This never prompts.
     if (typeof (this.client as any).preflightAuth === "function") {
       const state = await (this.client as any).preflightAuth();
       if (state !== "valid") {
@@ -118,15 +137,29 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           return [new InfoItem("No scenarios found.")];
         }
 
-        // Build ScenarioItem[] for the map…
-        const scenarioItems: ScenarioItem[] = this.rootItems.map(s => new ScenarioItem(s));
+        // Build ScenarioItem[] for the map from pinned + paged results (dedup by shortId), pinned first.
+        const combined: Array<{ data: Scenario; pinned: boolean }> = [];
+        const seen = new Set<string>();
+        for (const s of this.pinned) {
+          if (!seen.has(s.shortId)) {
+            combined.push({ data: s, pinned: true });
+            seen.add(s.shortId);
+          }
+        }
+        for (const s of this.rootItems) {
+          if (!seen.has(s.shortId)) {
+            combined.push({ data: s, pinned: false });
+            seen.add(s.shortId);
+          }
+        }
+        const scenarioItems: ScenarioItem[] = combined.map(({ data, pinned }) => new ScenarioItem(data, pinned));
 
         this._scenarioItems.clear();
         for (const it of scenarioItems) {
           this._scenarioItems.set(it.data.shortId, it);
         }
 
-        // …then assemble the returned array as TreeItem[] so we can append LoadMoreItem
+        // then assemble the returned array as TreeItem[] so we can append LoadMoreItem
         const items: vscode.TreeItem[] = [...scenarioItems];
         if (!this.rootEnded) {
           items.push(new LoadMoreItem());
@@ -153,11 +186,11 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
         const changed = !prev || prev.kind !== kind || prev.desc !== desc;
         if (changed) {
           this.nodeMetaCache.set(shortId, { kind, desc });
-          el.contextValue = kind === "container" ? "scenario.container" : "scenario.leaf";
+          el.setKind(kind);
           el.description = desc;
           this._onDidChange.fire(el);
         } else {
-          el.contextValue = kind === "container" ? "scenario.container" : "scenario.leaf";
+          el.setKind(kind);
           el.description = desc;
         }
 
@@ -177,14 +210,22 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
 
         // Fetch from server only if forced or cache is empty.
         if (this.store.consumeServerReload(shortId) || !snapshot) {
-          const s = await this.client.getScenarioScripting(shortId);
-          snapshot = {
-            sharedLibrary: s.gameCodeSharedLibrary ?? null,
-            onInput: s.gameCodeOnInput ?? null,
-            onOutput: s.gameCodeOnOutput ?? null,
-            onModelContext: s.gameCodeOnModelContext ?? null
-          };
-          this.store.setSnapshot(shortId, snapshot);
+          try {
+            const s = await this.client.getScenarioScripting(shortId);
+            snapshot = {
+              sharedLibrary: s.gameCodeSharedLibrary ?? null,
+              onInput: s.gameCodeOnInput ?? null,
+              onOutput: s.gameCodeOnOutput ?? null,
+              onModelContext: s.gameCodeOnModelContext ?? null
+            };
+            this.store.setSnapshot(shortId, snapshot);
+          } catch (err: any) {
+            const msg = String(err?.message || err);
+            const friendly = msg.includes("AUTH")
+              ? "Authentication required to load scripts."
+              : "Scripts unavailable (not owner or access denied).";
+            return [new InfoItem(friendly)];
+          }
         }
 
         return this.rowsFrom(shortId, scenarioName, snapshot);
@@ -225,11 +266,19 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
 
 // ===== Tree items =====
 class ScenarioItem extends vscode.TreeItem {
-  constructor(public readonly data: Scenario) {
+  constructor(public readonly data: Scenario, public readonly pinned: boolean = false) {
     super(data.title, vscode.TreeItemCollapsibleState.Collapsed);
-    this.contextValue = "scenario.unknown"; // set on expansion
+    this.contextValue = this.contextFor("unknown");
     this.tooltip = `Scenario: ${data.title}`;
     this.iconPath = new vscode.ThemeIcon("symbol-structure");
+  }
+
+  private contextFor(kind: "container" | "leaf" | "unknown") {
+    return this.pinned ? `scenario.pinned.${kind}` : `scenario.${kind}`;
+  }
+
+  setKind(kind: "container" | "leaf") {
+    this.contextValue = this.contextFor(kind);
   }
 }
 

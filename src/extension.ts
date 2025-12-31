@@ -247,6 +247,43 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("aid-manager.lookupScenario", async () => {
+      const shortId = await vscode.window.showInputBox({
+        prompt: "Enter a scenario shortId/publicId to load",
+        placeHolder: "e.g. abc123",
+        ignoreFocusOut: true
+      });
+      const trimmed = shortId?.trim();
+      if (!trimmed) {
+        return;
+      }
+      try {
+        const scenario = await client.findScenarioByShortId(trimmed);
+        if (!scenario) {
+          vscode.window.showWarningMessage("Scenario not found or not accessible.");
+          return;
+        }
+        tree.addPinnedScenario(scenario);
+        vscode.window.showInformationMessage(`Added scenario "${scenario.title}" to the list.`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to look up scenario: ${err?.message ?? err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aid-manager.unpinScenario", async (item?: vscode.TreeItem) => {
+      const data = (item as any)?.data as { shortId?: string; title?: string } | undefined;
+      const shortId = data?.shortId;
+      if (!shortId) {
+        return;
+      }
+      tree.removePinned(shortId);
+      vscode.window.showInformationMessage(`Unpinned ${data?.title || shortId}.`);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("aid-manager.refreshScenario", async (item?: vscode.TreeItem) => {
       const scenario = (item as any)?.data as { shortId: string; title?: string; name?: string } | undefined;
       if (!scenario?.shortId) {

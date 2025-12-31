@@ -106,6 +106,63 @@ export class AIDClient {
     return items;
   }
 
+  /** Fetch a single scenario by shortId/publicId. Returns null if missing or not a scenario. */
+  async findScenarioByShortId(shortId: string): Promise<Scenario | null> {
+    type Resp = {
+      scenario: {
+        id: string;
+        shortId: string;
+        title: string;
+        description?: string | null;
+        image?: string | null;
+        curationTags?: string[] | null;
+        contentType?: string | null;
+        isOwner?: boolean | null;
+        createdAt?: string | null;
+      } | null;
+    };
+    const query = `
+      query FindScenario($shortId: String!) {
+        scenario(shortId: $shortId) {
+          id
+          shortId
+          title
+          description
+          image
+          curationTags
+          contentType
+          isOwner
+          createdAt
+        }
+      }
+    `;
+
+    const res = await this.gql<Resp>({
+      query,
+      variables: { shortId },
+      operationName: "FindScenario"
+    });
+
+    const s = res?.scenario;
+    if (!s) {
+      return null;
+    }
+    const kind = (s.contentType || "").toLowerCase();
+    if (kind !== "scenario") {
+      return null;
+    }
+
+    return {
+      id: s.id,
+      shortId: s.shortId,
+      title: s.title,
+      description: s.description ?? "",
+      image: s.image ?? "",
+      tags: Array.isArray(s.curationTags) ? s.curationTags : [],
+      createdAt: s.createdAt ? new Date(s.createdAt) : new Date(0)
+    };
+  }
+
   /** Paged listing. hasMore is true when server returned a full page. */
   async listScenariosPage(opts?: { limit?: number; offset?: number }): Promise<{ items: Scenario[]; hasMore: boolean; }> {
     type Searchable = {

@@ -4,7 +4,8 @@ VS Code extension for editing scripts related to AI Dungeon.
 
 ## Features
 
-Itemizes scenarios into a treeview allowing easier access to manage scripts.
+- Itemizes scenarios into a treeview allowing easier access to manage scripts.
+- Command palette action to look up any published scenario by ID (`Lookup Scenario by ID`) and pin it in the tree
 
 ## Getting Started
 

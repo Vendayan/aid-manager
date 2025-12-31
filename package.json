@@ -71,6 +71,16 @@
         "title": "Save As (Local Copy)"
       },
       {
+        "command": "aid-manager.lookupScenario",
+        "title": "Lookup Scenario by ID",
+        "icon": "$(search)"
+      },
+      {
+        "command": "aid-manager.unpinScenario",
+        "title": "Unpin Scenario",
+        "icon": "$(circle-slash)"
+      },
+      {
         "command": "aid-manager.exportScenarioScripts",
         "title": "Export…",
         "icon": "$(extensions-install-local-in-remote)"
@@ -102,6 +112,8 @@
         { "command": "aid-manager.exportScenarioScripts", "when": "never" },
         { "command": "aid-manager.signIn", "when": "never" },
         { "command": "aid-manager.loadMoreScenarios", "when": "never" },
+        { "command": "aid-manager.lookupScenario" },
+        { "command": "aid-manager.unpinScenario", "when": "never" },
         {
           "command": "aid-manager.saveCurrentAs",
           "when": "activeEditorIsEditor && resourceScheme == aid"
@@ -114,6 +126,11 @@
           "command": "aid-manager.refresh",
           "when": "view == aid-manager.scenarios && aid-manager.isAuthed",
           "group": "navigation@1"
+        },
+        {
+          "command": "aid-manager.lookupScenario",
+          "when": "view == aid-manager.scenarios && aid-manager.isAuthed",
+          "group": "navigation@3"
         },
         {
           "command": "aid-manager.signOut",
@@ -151,6 +168,12 @@
           "when": "view == aid-manager.scenarios && viewItem =~ /^scenario/",
           "group": "inline@3",
           "icon": "$(default-view-icon)"
+        },
+        {
+          "command": "aid-manager.unpinScenario",
+          "when": "view == aid-manager.scenarios && viewItem =~ /^scenario\\.pinned/",
+          "group": "inline@4",
+          "icon": "$(circle-slash)"
         }
       ]
     },
