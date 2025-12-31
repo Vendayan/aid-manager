@@ -108,16 +108,32 @@ export class AIDClient {
 
   /** Paged listing. hasMore is true when server returned a full page. */
   async listScenariosPage(opts?: { limit?: number; offset?: number }): Promise<{ items: Scenario[]; hasMore: boolean; }> {
-    type Searchable = { id: string; shortId: string; title: string; contentType: string; };
-    type Resp = { searchNoCache: Searchable[] };
+    type Searchable = {
+      id: string;
+      shortId: string;
+      title: string;
+      description?: string | null;
+      image?: string | null;
+      contentType?: string | null;
+      isOwner?: boolean | null;
+      curationTags?: string[] | null;
+    };
+    type Resp = { search: { items: Searchable[]; hasMore: boolean; } };
 
     const query = `
-      query GetSearchDataNoCache($input: SearchInput) {
-        searchNoCache(input: $input) {
-          id
-          shortId
-          title
-          contentType
+      query OpenSearch($input: SearchInput!) {
+        search(input: $input) {
+          items {
+            id
+            shortId
+            title
+            description
+            image
+            curationTags
+            contentType
+            isOwner
+          }
+          hasMore
         }
       }
     `;
@@ -128,36 +144,34 @@ export class AIDClient {
 
     const variables = {
       input: {
-        contentType: "scenario",
+        contentType: ["scenario"],
         sortOrder: "updated",
-        timeRange: "0",
-        thirdPerson: false,
         safe: false,
         contentRatingFilters: ["Unrated"],
         username: username || undefined,
-        isCurrentUser: true,
+        screen: "profile",
         limit,
         offset
       }
     };
 
-    const data = await this.gql<Resp>({ query, variables, operationName: "GetSearchDataNoCache" });
-    const itemsRaw = data.searchNoCache ?? [];
+    const data = await this.gql<Resp>({ query, variables, operationName: "OpenSearch" });
+    const itemsRaw = data.search?.items ?? [];
     const items = itemsRaw
-      .filter(i => i.contentType?.toLowerCase() === "scenario")
+      .filter(i => i.contentType?.toLowerCase() === "scenario" && i.isOwner)
       .map(i => ({
         id: i.id,
         shortId: i.shortId,
         title: i.title,
-        description: "",
-        image: "",
-        tags: [],
+        description: i.description ?? "",
+        image: i.image ?? "",
+        tags: Array.isArray(i.curationTags) ? i.curationTags : [],
         createdAt: new Date(0),
-        contentType: i.contentType
+        contentType: i.contentType ?? "scenario"
       }));
 
-    const hasMore = itemsRaw.length >= limit; // crude but works without total count
-    return { items, hasMore };
+    const hasMore = Boolean(data.search?.hasMore);
+    return { items, hasMore: hasMore && itemsRaw.length >= limit };
   }
 
   /**
