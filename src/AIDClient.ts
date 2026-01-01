@@ -264,8 +264,10 @@ export class AIDClient {
     const root = res?.scenario;
     const rawOpts: Opt[] = Array.isArray(root?.options) ? (root!.options as Opt[]) : [];
 
+    // Only include real children of this scenario. The API can return
+    // unrelated options when parentScenarioId is null or points elsewhere.
     const children = rawOpts
-      .filter(o => o.shortId !== root?.shortId && o.parentScenarioId !== null)
+      .filter(o => o.shortId !== root?.shortId && o.parentScenarioId === root?.id)
       .map(o => ({
         id: o.id,
         shortId: o.shortId,
