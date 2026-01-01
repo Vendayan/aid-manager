@@ -119,16 +119,16 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   getTreeItem(el: vscode.TreeItem) { return el; }
 
   async getChildren(el?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-    // Don't hit the API if auth isn't valid. This never prompts.
-    if (typeof (this.client as any).preflightAuth === "function") {
-      const state = await (this.client as any).preflightAuth();
-      if (state !== "valid") {
-        return [];
-      }
-    }
-
     try {
       if (!el) {
+        // Don't hit the API if auth isn't valid. This never prompts.
+        if (typeof (this.client as any).preflightAuth === "function") {
+          const state = await (this.client as any).preflightAuth();
+          if (state !== "valid") {
+            return [];
+          }
+        }
+
         // first page on demand
         if (!this.rootItems.length && !this.rootEnded && !this.rootLoading) {
           await this.loadMoreRoot();
@@ -224,7 +224,9 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
             const friendly = msg.includes("AUTH")
               ? "Authentication required to load scripts."
               : "Scripts unavailable (not owner or access denied).";
-            return [new InfoItem(friendly)];
+            // Show the warning but still render script rows in a "missing" state.
+            const rows = this.rowsFrom(shortId, scenarioName, undefined);
+            return [new InfoItem(friendly), ...rows];
           }
         }
 
@@ -236,6 +238,10 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
       const msg = String(e?.message || e);
       if (msg === "AUTH_MISSING" || msg === "AUTH_EXPIRED") {
         return [];
+      }
+      if (el instanceof ScenarioItem) {
+        const rows = this.rowsFrom(el.data.shortId, el.data.title, undefined);
+        return [new InfoItem(`Error: ${msg}`), ...rows];
       }
       return [new InfoItem(`Error: ${msg}`)];
     }

@@ -13,8 +13,8 @@ type Props = {
 
 type FilterResult = { cards: StoryCardView[]; error: string | null };
 
-const LIST_MIN_HEIGHT = 240;
-const LIST_MAX_HEIGHT = 620;
+const LIST_MIN_HEIGHT = 480;
+const LIST_MAX_HEIGHT = 1240;
 
 const filterCards = (cards: StoryCardView[], search: string, useRegex: boolean): FilterResult => {
   const query = search.trim();
@@ -28,8 +28,9 @@ const filterCards = (cards: StoryCardView[], search: string, useRegex: boolean):
         cards: cards.filter((card) => regex.test(card.title ?? "") || regex.test(card.keys ?? "")),
         error: null
       };
-    } catch (err: any) {
-      return { cards: [], error: err?.message ?? String(err) };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { cards: [], error: message };
     }
   }
   const needle = query.toLowerCase();

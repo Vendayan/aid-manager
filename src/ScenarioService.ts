@@ -758,6 +758,7 @@ export class ScenarioService {
           includeStorySummary: false,
           temperature: 1
         });
+        this.clearLocalScenarioOverride(shortId);
         return true;
       }
       return false;
@@ -785,6 +786,7 @@ export class ScenarioService {
         };
         try {
           await anyClient.updateStoryCard(payload);
+          this.clearLocalScenarioOverride(shortId);
           return true;
         } catch {
           // ignore and fall through
@@ -801,10 +803,12 @@ export class ScenarioService {
       const anyClient: any = this.client as any;
       if (typeof anyClient.deleteStoryCard === "function") {
         await anyClient.deleteStoryCard({ id, shortId, contentType: "scenario" });
+        this.clearLocalScenarioOverride(shortId);
         return true;
       }
       if (typeof anyClient.removeStoryCard === "function") {
         await anyClient.removeStoryCard(id);
+        this.clearLocalScenarioOverride(shortId);
         return true;
       }
       return false;
