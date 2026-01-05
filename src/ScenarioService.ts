@@ -1,6 +1,8 @@
 // src/ScenarioService.ts
 import * as vscode from "vscode";
 import { AIDClient } from "./AIDClient";
+import { LocalStore, ScenarioSnapshot } from "./LocalStore";
+import { ScriptEvent, Scenario } from "./AIDTypes";
 
 function sanitizePretty(name: string): string {
   return name.replace(/[\\/:*?"<>|\u0000-\u001F]+/g, "_").trim();
@@ -26,9 +28,31 @@ export class ScenarioService {
   private lastScriptsHash = new Map<string, string | null>();
   private scenarioStateMeta = new Map<string, { storyCardInstructions: string; storyCardStoryInformation: string; }>();
   private scenarioOverrides = new Map<string, any>();
+  private scenarioPanels = new Map<string, vscode.Webview>();
+  private storyCardPanels = new Map<string, { shortId: string; cardId: string; webview: vscode.Webview }>();
   private webviewStateWaiters = new WeakMap<vscode.Webview, Map<string, { resolve: (value: any) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>>();
+  // Tree-facing state (owns cache for scenario tree presentation)
+  private treeStore = new LocalStore();
+  private scenarioInfoCache = new Map<string, { isContainer: boolean; children: Scenario[] }>();
+  private treeEmitter = new vscode.EventEmitter<string | undefined>();
+  public readonly onDidChangeTreeState = this.treeEmitter.event;
+  private pageSize = 100;
+  private rootItems: Scenario[] = [];
+  private rootOffset = 0;
+  private rootEnded = false;
+  private rootLoading = false;
+  private storyCardCache = new Map<string, Array<{ id: string; title: string; type: string; description: string }>>();
 
-  public constructor(private client: AIDClient) { }
+  public constructor(private client: AIDClient) {
+    this.treeStore.onDidChange((shortId) => {
+      this.treeEmitter.fire(shortId);
+    });
+  }
+
+  private logStoryCards(msg: string, meta?: Record<string, any>): void {
+    const payload = meta ? ` ${JSON.stringify(meta)}` : "";
+    console.log(`[aid-manager][story-cards] ${msg}${payload}`);
+  }
 
   private cloneModel<T>(model: T): T {
     return JSON.parse(JSON.stringify(model));
@@ -59,6 +83,203 @@ export class ScenarioService {
       model.storyCards = this.cloneModel(snapshot.storyCards);
     }
     this.setLocalScenarioOverride(shortId, model);
+  }
+
+  // ---------- Scenario tree state (caching + events) ----------
+
+  public resetTreeState(): void {
+    this.rootItems = [];
+    this.rootOffset = 0;
+    this.rootEnded = false;
+    this.rootLoading = false;
+    this.scenarioInfoCache.clear();
+    this.storyCardCache.clear();
+    this.treeStore.resetAll();
+    this.treeEmitter.fire(undefined);
+  }
+
+  public getRootView(): { items: Scenario[]; hasMore: boolean; loading: boolean } {
+    return {
+      items: this.rootItems,
+      hasMore: !this.rootEnded,
+      loading: this.rootLoading
+    };
+  }
+
+  public async loadMoreRoot(): Promise<void> {
+    if (this.rootEnded || this.rootLoading) {
+      return;
+    }
+    this.rootLoading = true;
+    try {
+      const { items, hasMore } = await this.client.listScenariosPage({
+        limit: this.pageSize,
+        offset: this.rootOffset
+      });
+      this.rootItems = this.rootItems.concat(items);
+      this.rootOffset += items.length;
+      this.rootEnded = !hasMore;
+      this.treeEmitter.fire(undefined);
+    } finally {
+      this.rootLoading = false;
+    }
+  }
+
+  public async getScenarioInfoCached(shortId: string): Promise<{ isContainer: boolean; children: Scenario[] }> {
+    let info = this.scenarioInfoCache.get(shortId);
+    if (!info) {
+      info = await this.client.getScenarioInfo(shortId);
+      this.scenarioInfoCache.set(shortId, info);
+    }
+    return info;
+  }
+
+  public async getScriptSnapshotForTree(shortId: string): Promise<ScenarioSnapshot | undefined> {
+    const forceReload = this.treeStore.consumeServerReload(shortId);
+    let snapshot = this.treeStore.getSnapshot(shortId);
+
+    if (forceReload || !snapshot) {
+      const s = await this.client.getScenarioScripting(shortId);
+      snapshot = {
+        sharedLibrary: s.gameCodeSharedLibrary ?? null,
+        onInput: s.gameCodeOnInput ?? null,
+        onOutput: s.gameCodeOnOutput ?? null,
+        onModelContext: s.gameCodeOnModelContext ?? null
+      };
+      this.treeStore.setSnapshot(shortId, snapshot);
+    }
+
+    return snapshot;
+  }
+
+  public effectiveScriptExists(shortId: string, ev: ScriptEvent): boolean {
+    return this.treeStore.effectiveExists(shortId, ev);
+  }
+
+  public async getStoryCardsForTree(
+    shortId: string,
+    opts?: { force?: boolean; retryIfEmpty?: boolean }
+  ): Promise<Array<{ id: string; title: string; type: string; description: string }>> {
+    const force = !!opts?.force;
+    const retryIfEmpty = !!opts?.retryIfEmpty;
+
+    // Prefer local override if present, unless forcing server.
+    if (!force) {
+      const override = this.scenarioOverrides.get(shortId);
+      if (override?.storyCards && Array.isArray(override.storyCards)) {
+        const mapped = this.mapStoryCardsForTree(override.storyCards);
+        this.storyCardCache.set(shortId, mapped);
+        this.logStoryCards("using override story cards", { shortId, count: mapped.length });
+        return mapped;
+      }
+    }
+
+    if (!force) {
+      const cached = this.storyCardCache.get(shortId);
+      if (cached) {
+        this.logStoryCards("using cached story cards", { shortId, count: cached.length });
+        return cached;
+      }
+    } else {
+      this.storyCardCache.delete(shortId);
+    }
+
+    const fetchOnce = async (): Promise<Array<{ id: string; title: string; type: string; description: string }>> => {
+      const raw = await this.fetchScenario(shortId);
+      const mappedTree = this.mapStoryCardsForTree(raw?.storyCards ?? []);
+      const mappedWebview = this.mapStoryCardsForWebview(raw?.storyCards ?? []);
+      this.storyCardCache.set(shortId, mappedTree);
+      this.logStoryCards("fetched story cards from server", { shortId, count: mappedTree.length });
+      this.notifyStoryCardsChanged(shortId, mappedTree, mappedWebview);
+      return mappedTree;
+    };
+
+    let mapped = await fetchOnce();
+    if (retryIfEmpty && mapped.length === 0) {
+      await new Promise((res) => setTimeout(res, 300));
+      mapped = await fetchOnce();
+    }
+    return mapped;
+  }
+
+  public async copyStoryCardBetweenScenarios(sourceShortId: string, cardId: string, targetShortId: string): Promise<void> {
+    const card = await this.getStoryCardDetail(sourceShortId, cardId);
+    if (!card) {
+      throw new Error("Story card not found.");
+    }
+    const created = await this.createStoryCardSafe(targetShortId, {
+      title: card.title,
+      type: card.type,
+      description: card.description,
+      body: card.body,
+      keys: card.keys,
+      useForCharacterCreation: card.useForCharacterCreation
+    });
+    if (!created) {
+      throw new Error("Copy failed. The server may not support story card creation.");
+    }
+    this.logStoryCards("copied story card", { from: sourceShortId, to: targetShortId, cardId });
+    await this.addStoryCardToCache(targetShortId, created);
+  }
+
+  public async deleteStoryCard(shortId: string, cardId: string): Promise<void> {
+    const ok = await this.deleteStoryCardSafe(shortId, cardId);
+    if (!ok) {
+      throw new Error("Delete failed. The server may not support story card deletion.");
+    }
+    this.logStoryCards("deleted story card", { shortId, cardId });
+    await this.removeStoryCardFromCache(shortId, cardId);
+  }
+
+  public async updateStoryCard(shortId: string, cardId: string, patch: any): Promise<void> {
+    const updated = await this.updateStoryCardSafe(shortId, cardId, patch);
+    if (!updated) {
+      throw new Error("Update failed. The server may not support story card updates.");
+    }
+    await this.addStoryCardToCache(shortId, updated);
+  }
+
+  public refreshStoryCards(shortId: string): void {
+    this.storyCardCache.delete(shortId);
+    this.logStoryCards("refreshing story cards", { shortId });
+    this.treeEmitter.fire(shortId);
+  }
+
+  public async forceRefreshStoryCards(shortId: string): Promise<void> {
+    this.logStoryCards("force refreshing story cards", { shortId });
+    await this.getStoryCardsForTree(shortId, { force: true, retryIfEmpty: true });
+    this.treeEmitter.fire(shortId);
+  }
+
+  public markScriptExists(shortId: string, event: ScriptEvent): void {
+    this.treeStore.setOverride(shortId, event, "exists");
+  }
+
+  public markScriptMissing(shortId: string, event: ScriptEvent): void {
+    this.treeStore.setOverride(shortId, event, "missing");
+  }
+
+  public setServerScriptSnapshot(shortId: string, snap: ScenarioSnapshot): void {
+    this.treeStore.setSnapshot(shortId, snap);
+  }
+
+  public clearOverridesForScenario(shortId: string): void {
+    this.treeStore.clearOverrides(shortId);
+  }
+
+  public requestServerReload(shortId: string): void {
+    this.treeStore.clearSnapshot(shortId);
+    this.treeStore.clearOverrides(shortId);
+    this.treeStore.requestServerReload(shortId);
+    this.scenarioInfoCache.delete(shortId);
+    this.storyCardCache.delete(shortId);
+    this.scenarioOverrides.delete(shortId);
+    this.logStoryCards("requestServerReload", { shortId });
+    this.treeEmitter.fire(shortId);
+  }
+
+  public requestLocalRefresh(shortId: string): void {
+    this.treeStore.requestLocalRefresh(shortId);
   }
 
   public async getEditorJson(shortId: string): Promise<any> {
@@ -279,6 +500,38 @@ export class ScenarioService {
       "default-src 'none';",
       `img-src ${webview.cspSource} https: data:;`,
       `style-src ${webview.cspSource} 'unsafe-inline';`,
+      `script-src ${webview.cspSource} 'unsafe-inline';`,
+      `font-src ${webview.cspSource};`
+    ].join(" ");
+
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${cspMeta}</head>`);
+    } else {
+      html = cspMeta + html;
+    }
+
+    const assetRegex = /(src|href)="([^"]+)"/g;
+    const toUri = (assetPath: string): string => {
+      if (/^https?:/i.test(assetPath) || assetPath.startsWith("data:") || assetPath.startsWith("vscode-webview://")) {
+        return assetPath;
+      }
+      const normalized = assetPath.replace(/^\/+/, "").replace(/^\.\//, "");
+      const assetUri = webview.asWebviewUri(vscode.Uri.joinPath(distRoot, normalized));
+      return assetUri.toString();
+    };
+
+    return html.replace(assetRegex, (_match, attr, value) => `${attr}="${toUri(value)}"`);
+  }
+
+  public async renderStoryCardUI(context: vscode.ExtensionContext, webview: vscode.Webview): Promise<string> {
+    const distRoot = vscode.Uri.joinPath(context.extensionUri, "media", "scenario", "dist");
+    let html = await readText(context, "media/scenario/dist/story-card.html");
+
+    const csp = [
+      "default-src 'none';",
+      `img-src ${webview.cspSource} https: data:;`,
+      `style-src ${webview.cspSource} 'unsafe-inline';`,
       `script-src ${webview.cspSource};`,
       `font-src ${webview.cspSource};`
     ].join(" ");
@@ -466,6 +719,7 @@ export class ScenarioService {
   }
 
   public async sendScenarioInit(webview: vscode.Webview, shortId: string): Promise<void> {
+    this.scenarioPanels.set(shortId, webview);
     const model = await this.getEditorJson(shortId);
 
     // Plot components may require a details call; handle best-effort.
@@ -480,6 +734,19 @@ export class ScenarioService {
       plotComponents,
       storyCards
     });
+  }
+
+  public async sendStoryCardInit(webview: vscode.Webview, shortId: string, cardId: string): Promise<void> {
+    // Always fetch fresh for single-card panels to avoid stale overrides.
+    const card = await this.getStoryCardDetail(shortId, cardId, { forceServer: true });
+    if (!card) {
+      console.warn(`[aid-manager][story-card] init: card not found`, { shortId, cardId });
+      webview.postMessage({ type: "storyCard:deleted" });
+      return;
+    }
+    this.storyCardPanels.set(`${shortId}:${cardId}`, { shortId, cardId, webview });
+    console.log(`[aid-manager][story-card] init: sending card`, { shortId, cardId, card });
+    webview.postMessage({ type: "storyCard:set", card: this.mapStoryCardsForWebview([card])[0] });
   }
 
   /**
@@ -532,11 +799,7 @@ export class ScenarioService {
               vscode.window.showWarningMessage("Failed to create story card. Please try again.");
               break;
             }
-            const fresh = await this.getEditorJson(shortId);
-            webview.postMessage({
-              type: "storyCards:set",
-              storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
-            });
+            this.addStoryCardToCache(shortId, created);
             break;
           }
 
@@ -547,11 +810,7 @@ export class ScenarioService {
               vscode.window.showWarningMessage("Failed to delete story card. Please try again.");
               break;
             }
-            const fresh = await this.getEditorJson(shortId);
-            webview.postMessage({
-              type: "storyCards:set",
-              storyCards: this.mapStoryCardsForWebview(fresh?.storyCards ?? [])
-            });
+            this.removeStoryCardFromCache(shortId, msg.id);
             break;
           }
 
@@ -612,6 +871,57 @@ export class ScenarioService {
         clearTimeout(waiter.timer);
         waiter.reject(new Error("Scenario editor closed before responding."));
       }
+      this.scenarioPanels.forEach((wv, key) => {
+        if (wv === webview) {
+          this.scenarioPanels.delete(key);
+        }
+      });
+    });
+  }
+
+  public attachStoryCardWebviewHandlers(webview: vscode.Webview, shortId: string, cardId: string): vscode.Disposable {
+    const sub = webview.onDidReceiveMessage(async (msg: any) => {
+      try {
+        switch (msg?.type) {
+          case "storyCard:ready": {
+            console.log("[aid-manager][story-card] ready message received", { shortId, cardId });
+            await this.sendStoryCardInit(webview, shortId, cardId);
+            break;
+          }
+          case "storyCard:update": {
+            const patch = msg?.patch || {};
+            try {
+              await this.updateStoryCard(shortId, cardId, patch);
+              const latest = await this.getStoryCardDetail(shortId, cardId);
+              if (latest) {
+                webview.postMessage({ type: "storyCard:set", card: this.mapStoryCardsForWebview([latest])[0] });
+              }
+            } catch (err: any) {
+              webview.postMessage({ type: "storyCard:error", message: err?.message ?? String(err) });
+            }
+            break;
+          }
+          case "storyCard:delete": {
+            try {
+              await this.deleteStoryCard(shortId, cardId);
+              webview.postMessage({ type: "storyCard:deleted" });
+            } catch (err: any) {
+              webview.postMessage({ type: "storyCard:error", message: err?.message ?? String(err) });
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (err: any) {
+        webview.postMessage({ type: "storyCard:error", message: err?.message ?? String(err) });
+      }
+    });
+
+    return new vscode.Disposable(() => {
+      sub.dispose();
+      const key = `${shortId}:${cardId}`;
+      this.storyCardPanels.delete(key);
     });
   }
 
@@ -637,16 +947,134 @@ export class ScenarioService {
 
   /* ---------- helpers ---------- */
 
-  private mapStoryCardsForWebview(items: any[]): Array<{ id: string; title: string; type: string; keys: string; body: string; description: string; useForCharacterCreation: boolean }> {
+  public mapStoryCardsForWebview(items: any[]): Array<{ id: string; title: string; type: string; keys: string; body: string; description: string; useForCharacterCreation: boolean }> {
     return (items || []).map((sc: any) => ({
       id: sc.id,
       title: sc.title ?? "",
       type: sc.type ?? "card",
       keys: sc.keys ?? "",
-      body: String(sc.value ?? ""),
+      body: String(sc.body ?? sc.value ?? ""),
       description: String(sc.description ?? ""),
       useForCharacterCreation: !!sc.useForCharacterCreation
     }));
+  }
+
+  private mapStoryCardsForTree(items: any[]): Array<{ id: string; title: string; type: string; description: string }> {
+    return (items || [])
+      .filter(Boolean)
+      .map((sc: any) => ({
+        id: sc.id ?? "",
+        title: (sc.title ?? sc.name ?? "Untitled").toString(),
+        type: (sc.type ?? "custom").toString(),
+        description: (sc.description ?? "").toString()
+      }))
+      .filter((sc) => sc.id || sc.title);
+  }
+
+  public async getStoryCardDetail(shortId: string, cardId: string, opts?: { forceServer?: boolean }): Promise<{
+    id: string;
+    title: string;
+    type: string;
+    description: string;
+    keys: string;
+    body: string;
+    useForCharacterCreation: boolean;
+  } | null> {
+    const override = this.scenarioOverrides.get(shortId);
+    const findCard = (items: any[]) => {
+      for (const sc of items || []) {
+        if (!sc) continue;
+        if (sc.id === cardId) {
+          return {
+            id: sc.id ?? "",
+            title: (sc.title ?? sc.name ?? "Untitled").toString(),
+            type: (sc.type ?? "custom").toString(),
+            description: (sc.description ?? "").toString(),
+            keys: (sc.keys ?? "").toString(),
+            body: String(sc.value ?? ""),
+            useForCharacterCreation: !!sc.useForCharacterCreation
+          };
+        }
+      }
+      return null;
+    };
+
+    const forceServer = !!opts?.forceServer;
+
+    if (!forceServer) {
+      if (override?.storyCards && Array.isArray(override.storyCards)) {
+        const found = findCard(override.storyCards);
+        if (found) { return found; }
+      }
+    }
+
+    const raw = await this.fetchScenario(shortId);
+    return findCard(raw?.storyCards ?? []) ?? null;
+  }
+
+  private async addStoryCardToCache(shortId: string, card: any): Promise<void> {
+    const mappedTree = this.mapStoryCardsForTree([card]);
+    if (!mappedTree.length) {
+      return;
+    }
+    const existing = this.storyCardCache.get(shortId) ?? [];
+    const deduped = existing.filter((c) => c.id !== mappedTree[0].id);
+    const next = [...deduped, mappedTree[0]];
+    this.storyCardCache.set(shortId, next);
+    this.treeEmitter.fire(shortId);
+    // Fetch full data to populate keys/body for webviews and keep cache accurate.
+    await this.forceRefreshStoryCards(shortId);
+  }
+
+  private async removeStoryCardFromCache(shortId: string, cardId: string): Promise<void> {
+    const existing = this.storyCardCache.get(shortId);
+    if (!existing) {
+      await this.forceRefreshStoryCards(shortId);
+      return;
+    }
+    const next = existing.filter((c) => c.id !== cardId);
+    this.storyCardCache.set(shortId, next);
+    this.treeEmitter.fire(shortId);
+    await this.forceRefreshStoryCards(shortId);
+  }
+
+  private notifyStoryCardsChanged(
+    shortId: string,
+    treeCards: Array<{ id: string; title: string; type: string; description: string }>,
+    webviewCards?: Array<{ id: string; title: string; type: string; keys: string; body: string; description: string; useForCharacterCreation: boolean }>
+  ): void {
+    const webview = this.scenarioPanels.get(shortId);
+    if (webview) {
+      webview.postMessage({
+        type: "storyCards:set",
+        storyCards: webviewCards ?? this.mapStoryCardsForWebview(treeCards)
+      });
+    }
+
+    // Update any standalone story card panels for this scenario.
+    if (this.storyCardPanels.size > 0) {
+      const byId = new Map<string, any>();
+      if (webviewCards) {
+        for (const c of webviewCards) {
+          byId.set(c.id, c);
+        }
+      } else {
+        for (const c of this.mapStoryCardsForWebview(treeCards)) {
+          byId.set(c.id, c);
+        }
+      }
+      for (const [key, entry] of this.storyCardPanels.entries()) {
+        if (entry.shortId !== shortId) {
+          continue;
+        }
+        const card = byId.get(entry.cardId);
+        if (card) {
+          entry.webview.postMessage({ type: "storyCard:set", card });
+        } else {
+          entry.webview.postMessage({ type: "storyCard:deleted" });
+        }
+      }
+    }
   }
 
   private async getPlotComponentsSafe(shortId: string): Promise<Record<string, { type: string; text: string }>> {
@@ -738,12 +1166,12 @@ export class ScenarioService {
     return this.scenarioStateMeta.get(shortId) ?? { storyCardInstructions: "", storyCardStoryInformation: "" };
   }
 
-  private async createStoryCardSafe(shortId: string, initial?: { title?: string; type?: string; body?: string; description?: string; keys?: string; useForCharacterCreation?: boolean }): Promise<boolean> {
+  private async createStoryCardSafe(shortId: string, initial?: { title?: string; type?: string; body?: string; description?: string; keys?: string; useForCharacterCreation?: boolean }): Promise<any | null> {
     try {
       const anyClient: any = this.client as any;
       const meta = this.getStoryCardContext(shortId);
       if (typeof anyClient.createStoryCard === "function") {
-        await anyClient.createStoryCard({
+        const created = await anyClient.createStoryCard({
           shortId,
           contentType: "scenario",
           type: initial?.type || "custom",
@@ -759,15 +1187,15 @@ export class ScenarioService {
           temperature: 1
         });
         this.clearLocalScenarioOverride(shortId);
-        return true;
+        return created;
       }
-      return false;
+      return null;
     } catch {
-      return false;
+      return null;
     }
   }
 
-  private async updateStoryCardSafe(shortId: string, id: string, patch: any): Promise<boolean> {
+  private async updateStoryCardSafe(shortId: string, id: string, patch: any): Promise<any | null> {
     try {
       const anyClient: any = this.client as any;
       if (typeof anyClient.updateStoryCard === "function") {
@@ -779,22 +1207,22 @@ export class ScenarioService {
           title: patch.title,
           description: patch.description ?? "",
           keys: patch.keys,
-          value: patch.value ?? "",
+          value: typeof patch.value === "string" ? patch.value : (typeof patch.body === "string" ? patch.body : ""),
           useForCharacterCreation: typeof patch.useForCharacterCreation === "boolean"
             ? patch.useForCharacterCreation
             : undefined
         };
         try {
-          await anyClient.updateStoryCard(payload);
+          const res = await anyClient.updateStoryCard(payload);
           this.clearLocalScenarioOverride(shortId);
-          return true;
+          return res;
         } catch {
           // ignore and fall through
         }
       }
-      return false;
+      return null;
     } catch {
-      return false;
+      return null;
     }
   }
 

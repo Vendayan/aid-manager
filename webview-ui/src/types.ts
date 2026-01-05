@@ -56,6 +56,17 @@ export type HostMessage =
       storyCards?: StoryCard[];
     }
   | {
+      type: "storyCard:set";
+      card: StoryCard;
+    }
+  | {
+      type: "storyCard:deleted";
+    }
+  | {
+      type: "storyCard:error";
+      message?: string;
+    }
+  | {
       type: "scenario:requestState";
       requestId: string;
     };

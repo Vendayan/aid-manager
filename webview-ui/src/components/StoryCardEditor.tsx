@@ -68,7 +68,7 @@ export function StoryCardEditor({ card, onChange, onSave, onDelete }: Props) {
         </label>
       </div>
       <label className="field">
-        <span>Body</span>
+        <span>Entry</span>
         <textarea
           value={card.body ?? ""}
           onChange={handleChange("body")}

@@ -103,6 +103,16 @@
         "command": "aid-manager.openScenarioForm",
         "title": "Open Scenario Form",
         "icon": "$(default-view-icon)"
+      },
+      {
+        "command": "aid-manager.openStoryCard",
+        "title": "Open Story Card",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "aid-manager.deleteStoryCard",
+        "title": "Delete Story Card",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -174,6 +184,18 @@
           "when": "view == aid-manager.scenarios && viewItem =~ /^scenario\\.pinned/",
           "group": "inline@4",
           "icon": "$(circle-slash)"
+        },
+        {
+          "command": "aid-manager.deleteStoryCard",
+          "when": "view == aid-manager.scenarios && viewItem == storyCard",
+          "group": "inline@5",
+          "icon": "$(trash)"
+        },
+        {
+          "command": "aid-manager.openStoryCard",
+          "when": "view == aid-manager.scenarios && viewItem == storyCard",
+          "group": "inline@0",
+          "icon": "$(edit)"
         }
       ]
     },

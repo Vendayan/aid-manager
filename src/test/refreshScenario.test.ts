@@ -9,7 +9,6 @@ suite("refreshScenario helper", () => {
     const events = {
       clearSnapshot: 0,
       requestServerReload: 0,
-      clearOverrides: 0,
       revert: 0,
       closeEditors: 0
     };
@@ -37,14 +36,11 @@ suite("refreshScenario helper", () => {
       panelMeta: typeof panelMeta;
     } = {
       scenarioService: {
-        shouldPurgeOnRefresh: async () => !!opts?.shouldPurge
+        shouldPurgeOnRefresh: async () => !!opts?.shouldPurge,
+        requestServerReload: () => { events.requestServerReload += 1; }
       } as any,
       fsProvider: {
         clearSnapshot: () => { events.clearSnapshot += 1; }
-      } as any,
-      tree: {
-        requestServerReload: () => { events.requestServerReload += 1; },
-        clearOverridesForScenario: () => { events.clearOverrides += 1; }
       } as any,
       editorTracker: {
         getAidEditorsForScenario: () => [makeUri("sharedLibrary")],
@@ -96,7 +92,6 @@ suite("refreshScenario helper", () => {
 
     assert.strictEqual(result, true);
     assert.strictEqual(deps.events.clearSnapshot, 1);
-    assert.strictEqual(deps.events.clearOverrides, 1);
     assert.strictEqual(deps.events.requestServerReload, 1);
     assert.strictEqual(deps.events.revert, 1);
     assert.strictEqual(deps.events.closeEditors, 1);

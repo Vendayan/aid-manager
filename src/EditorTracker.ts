@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ScenarioTreeProvider } from "./ScenarioTree";
+import { ScenarioService } from "./ScenarioService";
 import { ScriptEvent } from "./AIDTypes";
 
 /**
@@ -9,10 +9,10 @@ import { ScriptEvent } from "./AIDTypes";
  */
 export class EditorTracker {
   private readonly missingDocByUri = new Map<string, { shortId: string; event: ScriptEvent }>();
-  private readonly tree: ScenarioTreeProvider;
+  private readonly scenarios: ScenarioService;
 
-  public constructor(tree: ScenarioTreeProvider) {
-    this.tree = tree;
+  public constructor(scenarios: ScenarioService) {
+    this.scenarios = scenarios;
   }
 
   public attach(context: vscode.ExtensionContext): void {
@@ -22,7 +22,7 @@ export class EditorTracker {
         for (const [uriKey, meta] of Array.from(this.missingDocByUri.entries())) {
           if (!open.has(uriKey)) {
             this.missingDocByUri.delete(uriKey);
-            this.tree.markScriptMissing(meta.shortId, meta.event);
+            this.scenarios.markScriptMissing(meta.shortId, meta.event);
           }
         }
       })
@@ -31,15 +31,15 @@ export class EditorTracker {
     context.subscriptions.push(
       vscode.workspace.onDidCloseTextDocument((doc) => {
         const uriKey = doc.uri.toString();
-        const meta = this.missingDocByUri.get(uriKey);
-        if (!meta) {
-          return;
-        }
-        this.missingDocByUri.delete(uriKey);
-        this.tree.markScriptMissing(meta.shortId, meta.event);
-      })
-    );
-  }
+      const meta = this.missingDocByUri.get(uriKey);
+      if (!meta) {
+        return;
+      }
+      this.missingDocByUri.delete(uriKey);
+      this.scenarios.markScriptMissing(meta.shortId, meta.event);
+    })
+  );
+}
 
   public trackOpenedWhileMissing(uri: vscode.Uri, shortId: string, event: ScriptEvent): void {
     this.missingDocByUri.set(uri.toString(), { shortId, event });

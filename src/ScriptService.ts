@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
 import { AIDClient } from "./AIDClient";
 import { AidFsProvider } from "./AIDFSProvider";
-import { ScenarioTreeProvider } from "./ScenarioTree";
 import { FIELD_BY_EVENT, ScriptEvent } from "./AIDTypes";
 import { EditorTracker } from "./EditorTracker";
+import { ScenarioService } from "./ScenarioService";
 
 function sanitizePretty(name: string): string {
   return name.replace(/[\\/:*?"<>|\u0000-\u001F]+/g, "_").trim();
@@ -23,8 +23,8 @@ export class ScriptService {
   public constructor(
     private client: AIDClient,
     private fsProvider: AidFsProvider,
-    private tree: ScenarioTreeProvider,
-    private editors: EditorTracker
+    private editors: EditorTracker,
+    private scenarios: ScenarioService
   ) {}
 
   public async openScript(args: {
@@ -37,7 +37,7 @@ export class ScriptService {
     const { shortId, event, scenarioName, scriptName, existed } = args;
 
     if (!existed) {
-      this.tree.markScriptExists(shortId, event);
+      this.scenarios.markScriptExists(shortId, event);
     }
 
     const pretty = sanitizePretty(`${scenarioName} - ${scriptName}.js`);
@@ -101,7 +101,7 @@ export class ScriptService {
           onModelContext: result.scenario.gameCodeOnModelContext ?? null
         });
 
-        this.tree.setServerCache(scenarioShortId, {
+        this.scenarios.setServerScriptSnapshot(scenarioShortId, {
           sharedLibrary: result.scenario.gameCodeSharedLibrary ?? null,
           onInput: result.scenario.gameCodeOnInput ?? null,
           onOutput: result.scenario.gameCodeOnOutput ?? null,
@@ -120,12 +120,12 @@ export class ScriptService {
           const editorOpen = this.editors.isAidEditorOpenFor(scenarioShortId, ev);
 
           if (serverHasText || editorOpen) {
-            this.tree.markScriptExists(scenarioShortId, ev);
+            this.scenarios.markScriptExists(scenarioShortId, ev);
             if (serverHasText) {
               this.editors.clearMissingFlagForOpenTabs(scenarioShortId, ev);
             }
           } else {
-            this.tree.markScriptMissing(scenarioShortId, ev);
+            this.scenarios.markScriptMissing(scenarioShortId, ev);
           }
         }
       }

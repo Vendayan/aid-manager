@@ -28,17 +28,25 @@ function sanitizePretty(name: string): string {
 export async function activate(context: vscode.ExtensionContext) {
   const auth = new AuthService(context);
   const client = new AIDClient(context, auth);
-  const tree = new ScenarioTreeProvider(client);
+  const scenarioService = new ScenarioService(client);
+  const tree = new ScenarioTreeProvider(client, scenarioService);
   // Track scenario form webviews so refresh can close/reopen them with fresh data.
   const scenarioPanels = new Map<string, ScenarioPanelEntry>();
+  // Track standalone story card panels to prevent duplicates.
+  const storyCardPanels = new Map<string, { panel: vscode.WebviewPanel; dispose: () => void }>();
 
-  context.subscriptions.push(vscode.window.registerTreeDataProvider('aid-manager.scenarios', tree));
+  const treeView = vscode.window.createTreeView('aid-manager.scenarios', {
+    treeDataProvider: tree,
+    dragAndDropController: tree,
+    showCollapseAll: true
+  });
+  context.subscriptions.push(treeView);
 
   // Derive the initial auth context from our secret store so view/title actions render correctly.
   const initialAuthState = await auth.authState().catch(() => "missing");
   await setAuthed(initialAuthState === "valid");
 
-  const editorTracker = new EditorTracker(tree);
+  const editorTracker = new EditorTracker(scenarioService);
   editorTracker.attach(context);
 
   const fsProvider = new AidFsProvider(
@@ -48,7 +56,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(vscode.workspace.registerFileSystemProvider('aid', fsProvider, { isCaseSensitive: true }));
 
-  const scenarioService = new ScenarioService(client);
   fsProvider.setScenarioJsonReader(async (shortId: string) => {
     const model = await scenarioService.getEditorJson(shortId);
     const json = JSON.stringify(model, null, 2);
@@ -213,8 +220,34 @@ export async function activate(context: vscode.ExtensionContext) {
     });
     await scenarioService.sendScenarioInit(panel.webview, shortId);
   };
+  const openStoryCardPanel = async (shortId: string, cardId: string, column?: vscode.ViewColumn): Promise<void> => {
+    const key = `${shortId}:${cardId}`;
+    const existing = storyCardPanels.get(key);
+    if (existing) {
+      existing.panel.reveal(existing.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+      await scenarioService.sendStoryCardInit(existing.panel.webview, shortId, cardId);
+      return;
+    }
+    const detail = await scenarioService.getStoryCardDetail(shortId, cardId);
+    const title = detail?.title ? `Story Card: ${detail.title}` : "Story Card";
+    const panel = vscode.window.createWebviewPanel("aidStoryCard", title, column ?? vscode.ViewColumn.Active, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")]
+    });
+    const disposable = scenarioService.attachStoryCardWebviewHandlers(panel.webview, shortId, cardId);
+    storyCardPanels.set(key, { panel, dispose: () => disposable.dispose() });
+    panel.onDidDispose(() => {
+      disposable.dispose();
+      storyCardPanels.delete(key);
+    });
+    // Attach handlers first, then set HTML, then send initial payload.
+    panel.webview.html = await scenarioService.renderStoryCardUI(context, panel.webview);
+    // Send initial payload; the webview will also request init on ready as a fallback.
+    await scenarioService.sendStoryCardInit(panel.webview, shortId, cardId).catch(() => { /* handled in handler */ });
+  };
 
-  const scriptService = new ScriptService(client, fsProvider, tree, editorTracker);
+  const scriptService = new ScriptService(client, fsProvider, editorTracker, scenarioService);
   fsProvider.setRemoteSave(async (args) => {
     await scriptService.saveScriptsAtomic(args);
   });
@@ -294,7 +327,6 @@ export async function activate(context: vscode.ExtensionContext) {
         {
           scenarioService,
           fsProvider,
-          tree,
           editorTracker,
           scenarioPanels,
           openScenarioFormPanel,
@@ -311,6 +343,19 @@ export async function activate(context: vscode.ExtensionContext) {
           return choice === "Refresh Scenario";
         }
       );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aid-manager.openStoryCard", async (item?: vscode.TreeItem) => {
+      const sc: any = item;
+      const shortId: string | undefined = sc?.shortId;
+      const cardId: string | undefined = sc?.cardId;
+      const label: string = sc?.label ?? "Story Card";
+      if (!shortId || !cardId) {
+        return;
+      }
+      await openStoryCardPanel(shortId, cardId);
     })
   );
 
@@ -403,6 +448,33 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       await scenarioService.exportScenario(scenario.shortId, scenario.title || scenario.name || scenario.shortId);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aid-manager.deleteStoryCard", async (item?: vscode.TreeItem) => {
+      const sc = item as any;
+      const shortId: string | undefined = sc?.shortId;
+      const cardId: string | undefined = sc?.cardId;
+      const title: string = sc?.label ?? "Story Card";
+      if (!shortId || !cardId) {
+        return;
+      }
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete “${title}”? This cannot be undone.`,
+        { modal: true },
+        "Delete",
+        "Cancel"
+      );
+      if (confirm !== "Delete") {
+        return;
+      }
+      try {
+        await scenarioService.deleteStoryCard(shortId, cardId);
+        vscode.window.setStatusBarMessage("Story card deleted.", 2000);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to delete story card: ${err?.message ?? err}`);
+      }
     })
   );
 

@@ -8,7 +8,13 @@ export default defineConfig({
     build: {
         outDir: path.resolve(__dirname, "../media/scenario/dist"),
         emptyOutDir: true,
-        sourcemap: false
+        sourcemap: false,
+        rollupOptions: {
+            input: {
+                index: path.resolve(__dirname, "index.html"),
+                "story-card": path.resolve(__dirname, "story-card.html")
+            }
+        }
     }
 });
 //# sourceMappingURL=vite.config.js.map

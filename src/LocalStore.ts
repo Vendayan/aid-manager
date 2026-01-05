@@ -105,4 +105,11 @@ export class LocalStore {
   requestLocalRefresh(shortId: string): void {
     this.emitter.fire(shortId);
   }
+
+  resetAll(): void {
+    this.snaps.clear();
+    this.overrides.clear();
+    this.forceReload.clear();
+    this.emitter.fire(undefined);
+  }
 }

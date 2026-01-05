@@ -1,13 +1,11 @@
 import * as vscode from "vscode";
 import { ScenarioService } from "./ScenarioService";
 import { AidFsProvider } from "./AIDFSProvider";
-import { ScenarioTreeProvider } from "./ScenarioTree";
 import { EditorTracker } from "./EditorTracker";
 
 export type RefreshScenarioContext = {
   scenarioService: ScenarioService;
   fsProvider: AidFsProvider;
-  tree: ScenarioTreeProvider;
   editorTracker: EditorTracker;
   scenarioPanels: Map<string, { panel: vscode.WebviewPanel; dirty: boolean }>;
   openScenarioFormPanel: (shortId: string, column?: vscode.ViewColumn) => Promise<void>;
@@ -34,7 +32,6 @@ export async function refreshScenario(
   const {
     scenarioService,
     fsProvider,
-    tree,
     editorTracker,
     scenarioPanels,
     openScenarioFormPanel,
@@ -80,13 +77,15 @@ export async function refreshScenario(
   if (shouldPurge) {
     closePanel();
     fsProvider.clearSnapshot(shortId);
-    tree.clearOverridesForScenario(shortId);
-    tree.requestServerReload(shortId);
+    scenarioService.requestServerReload(shortId);
   } else {
     closePanel();
     fsProvider.clearSnapshot(shortId);
-    tree.requestServerReload(shortId);
+    scenarioService.requestServerReload(shortId);
   }
+
+  // Force-fetch story cards so the tree reflects server state right after refresh.
+  await scenarioService.forceRefreshStoryCards(shortId);
 
   if (shouldPurge || dirtyScripts > 0) {
     const openUris = editorTracker.getAidEditorsForScenario(shortId);

@@ -1,50 +1,38 @@
 import * as vscode from "vscode";
 import { AIDClient } from "./AIDClient";
 import { Scenario, Script, FIELD_BY_EVENT, ScriptEvent } from "./AIDTypes";
-import { LocalStore, ScenarioSnapshot } from "./LocalStore";
+import { ScenarioService } from "./ScenarioService";
 
-export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.TreeDragAndDropController<vscode.TreeItem> {
   private _onDidChange = new vscode.EventEmitter<vscode.TreeItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChange.event;
+  readonly dragMimeTypes = ["application/aid-storycard"];
+  readonly dropMimeTypes = ["application/aid-storycard"];
 
   private _scenarioItems = new Map<string, ScenarioItem>(); // shortId -> item
-  private store = new LocalStore();
 
-  // ---- root pagination state ----
-  private pageSize = 100;
-  private rootItems: Scenario[] = [];
   private pinned: Scenario[] = [];
-  private rootOffset = 0;
-  private rootEnded = false;
-  private rootLoading = false;
 
-  // ---- memo & metadata caches to avoid repoll/loops ----
-  private scenarioInfoCache = new Map<string, { isContainer: boolean; children: Scenario[] }>();
-  private nodeMetaCache = new Map<string, { kind: "container" | "leaf" | "unknown"; desc?: string }>();
-
-  constructor(private client: AIDClient) {
-    this.store.onDidChange((shortId) => {
+  constructor(private client: AIDClient, private scenarios: ScenarioService) {
+    this.scenarios.onDidChangeTreeState((shortId) => {
       if (!shortId) {
         this._onDidChange.fire(undefined);
         return;
       }
       const node = this._scenarioItems.get(shortId);
-      this._onDidChange.fire(node);
+      this._onDidChange.fire(node ?? undefined);
     });
+  }
+
+  dispose(): void {
+    // nothing to dispose currently
   }
 
   // ----- public API -----
 
   refresh() {
     this._scenarioItems.clear();
-    // reset paging
-    this.rootItems = [];
-    this.rootOffset = 0;
-    this.rootEnded = false;
-    this.rootLoading = false;
-    // clear caches
-    this.scenarioInfoCache.clear();
-    this.nodeMetaCache.clear();
+    this.scenarios.resetTreeState();
     this._onDidChange.fire(undefined);
   }
 
@@ -67,54 +55,8 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   }
 
   async loadMoreRoot(): Promise<void> {
-    if (this.rootEnded || this.rootLoading) {
-      return;
-    }
-    this.rootLoading = true;
-    try {
-      const { items, hasMore } = await this.client.listScenariosPage({
-        limit: this.pageSize,
-        offset: this.rootOffset
-      });
-      this.rootItems = this.rootItems.concat(items);
-      this.rootOffset += items.length;
-      this.rootEnded = !hasMore;
-      this._onDidChange.fire(undefined);
-    } finally {
-      this.rootLoading = false;
-    }
+    await this.scenarios.loadMoreRoot();
   }
-
-  setServerCache(shortId: string, snap: ScenarioSnapshot) { this.store.setSnapshot(shortId, snap); }
-  requestLocalRefresh(shortId: string) { this.store.requestLocalRefresh(shortId); }
-
-  /**
-   * FULL reload of one scenario:
-   * - clear LocalStore snapshot
-   * - clear LocalStore overrides
-   * - clear container/children memo + node meta
-   * - set store "force reload" flag
-   * - poke the specific node to re-render (next expand refetches)
-   */
-  requestServerReload(shortId: string) {
-    this.store.clearSnapshot(shortId);
-    this.store.clearOverrides(shortId);
-    this.store.requestServerReload(shortId);
-
-    this.scenarioInfoCache.delete(shortId);
-    this.nodeMetaCache.delete(shortId);
-
-    const node = this._scenarioItems.get(shortId);
-    if (node) {
-      this._onDidChange.fire(node);
-    } else {
-      this._onDidChange.fire(undefined);
-    }
-  }
-
-  clearOverridesForScenario(shortId: string) { this.store.clearOverrides(shortId); }
-  markScriptExists(shortId: string, event: ScriptEvent) { this.store.setOverride(shortId, event, "exists"); }
-  markScriptMissing(shortId: string, event: ScriptEvent) { this.store.setOverride(shortId, event, "missing"); }
 
   getTreeItem(el: vscode.TreeItem) { return el; }
 
@@ -129,11 +71,12 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           }
         }
 
-        // first page on demand
-        if (!this.rootItems.length && !this.rootEnded && !this.rootLoading) {
+        let root = this.scenarios.getRootView();
+        if (!root.items.length && root.hasMore && !root.loading) {
           await this.loadMoreRoot();
+          root = this.scenarios.getRootView();
         }
-        if (!this.rootItems.length && this.rootEnded) {
+        if (!root.items.length && !root.hasMore) {
           return [new InfoItem("No scenarios found.")];
         }
 
@@ -146,7 +89,7 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
             seen.add(s.shortId);
           }
         }
-        for (const s of this.rootItems) {
+        for (const s of root.items) {
           if (!seen.has(s.shortId)) {
             combined.push({ data: s, pinned: false });
             seen.add(s.shortId);
@@ -161,7 +104,7 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
 
         // then assemble the returned array as TreeItem[] so we can append LoadMoreItem
         const items: vscode.TreeItem[] = [...scenarioItems];
-        if (!this.rootEnded) {
+        if (root.hasMore) {
           items.push(new LoadMoreItem());
         }
         return items;
@@ -171,28 +114,12 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
         const shortId = el.data.shortId;
         const scenarioName = el.data.title;
 
-        // ---- container vs leaf detection with memo ----
-        let info = this.scenarioInfoCache.get(shortId);
-        if (!info) {
-          info = await this.client.getScenarioInfo(shortId);
-          this.scenarioInfoCache.set(shortId, info);
-        }
-
+        const info = await this.scenarios.getScenarioInfoCached(shortId);
         const kind: "container" | "leaf" = info.isContainer ? "container" : "leaf";
         const desc = info.isContainer ? `${info.children.length} options` : undefined;
 
-        // Only notify UI if metadata actually changed
-        const prev = this.nodeMetaCache.get(shortId);
-        const changed = !prev || prev.kind !== kind || prev.desc !== desc;
-        if (changed) {
-          this.nodeMetaCache.set(shortId, { kind, desc });
-          el.setKind(kind);
-          el.description = desc;
-          this._onDidChange.fire(el);
-        } else {
-          el.setKind(kind);
-          el.description = desc;
-        }
+        el.setKind(kind);
+        el.description = desc;
 
         if (kind === "container") {
           if (info.children.length === 0) {
@@ -206,31 +133,28 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
         }
 
         // ---- leaf: show scripts (existing behavior) ----
-        let snapshot = this.store.getSnapshot(shortId);
-
-        // Fetch from server only if forced or cache is empty.
-        if (this.store.consumeServerReload(shortId) || !snapshot) {
-          try {
-            const s = await this.client.getScenarioScripting(shortId);
-            snapshot = {
-              sharedLibrary: s.gameCodeSharedLibrary ?? null,
-              onInput: s.gameCodeOnInput ?? null,
-              onOutput: s.gameCodeOnOutput ?? null,
-              onModelContext: s.gameCodeOnModelContext ?? null
-            };
-            this.store.setSnapshot(shortId, snapshot);
-          } catch (err: any) {
-            const msg = String(err?.message || err);
-            const friendly = msg.includes("AUTH")
-              ? "Authentication required to load scripts."
-              : "Scripts unavailable (not owner or access denied).";
-            // Show the warning but still render script rows in a "missing" state.
-            const rows = this.rowsFrom(shortId, scenarioName, undefined);
-            return [new InfoItem(friendly), ...rows];
-          }
+        try {
+          await this.scenarios.getScriptSnapshotForTree(shortId);
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          const friendly = msg.includes("AUTH")
+            ? "Authentication required to load scripts."
+            : "Scripts unavailable (not owner or access denied).";
+          // Show the warning but still render script rows in a "missing" state.
+          const rows = this.rowsFrom(shortId, scenarioName);
+          return [new InfoItem(friendly), ...rows];
         }
 
-        return this.rowsFrom(shortId, scenarioName, snapshot);
+        const storyCardsFolder = new StoryCardsFolderItem(shortId, scenarioName);
+        return [storyCardsFolder, ...this.rowsFrom(shortId, scenarioName)];
+      }
+
+      if (el instanceof StoryCardsFolderItem) {
+        const cards = await this.scenarios.getStoryCardsForTree(el.shortId);
+        if (!cards.length) {
+          return [new InfoItem("No story cards for this scenario.")];
+        }
+        return cards.map(c => new StoryCardItem(el.shortId, el.scenarioName, c));
       }
 
       return [];
@@ -240,14 +164,14 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
         return [];
       }
       if (el instanceof ScenarioItem) {
-        const rows = this.rowsFrom(el.data.shortId, el.data.title, undefined);
+        const rows = this.rowsFrom(el.data.shortId, el.data.title);
         return [new InfoItem(`Error: ${msg}`), ...rows];
       }
       return [new InfoItem(`Error: ${msg}`)];
     }
   }
 
-  private rowsFrom(shortId: string, scenarioName: string, s?: ScenarioSnapshot): vscode.TreeItem[] {
+  private rowsFrom(shortId: string, scenarioName: string): vscode.TreeItem[] {
     const defs = [
       { event: "sharedLibrary" as const, name: "Shared Library" },
       { event: "onInput" as const, name: "Input" },
@@ -256,7 +180,7 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
     ];
 
     return defs.map(d => {
-      const exists = this.store.effectiveExists(shortId, d.event);
+      const exists = this.scenarios.effectiveScriptExists(shortId, d.event);
       const data: Script & { exists: boolean } = {
         scenarioShortId: shortId,
         scenarioName,
@@ -267,6 +191,61 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
       };
       return new ScriptRow(data);
     });
+  }
+
+  async handleDrag(source: readonly vscode.TreeItem[], dataTransfer: vscode.DataTransfer): Promise<void> {
+    const card = source.find((item) => item instanceof StoryCardItem) as StoryCardItem | undefined;
+    if (!card) {
+      return;
+    }
+    const payload = JSON.stringify({ shortId: card.shortId, cardId: (card as any).cardId });
+    dataTransfer.set("application/aid-storycard", new vscode.DataTransferItem(payload));
+  }
+
+  async handleDrop(target: vscode.TreeItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+    const item = dataTransfer.get("application/aid-storycard");
+    if (!item) {
+      return;
+    }
+    let payload: { shortId: string; cardId: string } | null = null;
+    try {
+      payload = JSON.parse(item.value);
+    } catch {
+      return;
+    }
+    if (!payload?.shortId || !payload?.cardId) {
+      return;
+    }
+
+    const targetShortId = this.shortIdFromTarget(target);
+    if (!targetShortId) {
+      return;
+    }
+    if (targetShortId === payload.shortId) {
+      return; // no-op: same scenario
+    }
+
+    try {
+      await this.scenarios.copyStoryCardBetweenScenarios(payload.shortId, payload.cardId, targetShortId);
+      vscode.window.setStatusBarMessage("Story card copied.", 2000);
+      const node = this._scenarioItems.get(targetShortId);
+      this._onDidChange.fire(node ?? undefined);
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Failed to copy story card: ${err?.message ?? err}`);
+    }
+  }
+
+  private shortIdFromTarget(target?: vscode.TreeItem): string | null {
+    if (!target) {
+      return null;
+    }
+    if (target instanceof StoryCardsFolderItem || target instanceof StoryCardItem) {
+      return (target as any).shortId ?? null;
+    }
+    if (target instanceof ScenarioItem) {
+      return target.data.shortId;
+    }
+    return null;
   }
 }
 
@@ -307,6 +286,32 @@ class ScriptRow extends vscode.TreeItem {
     this.command = {
       command: "aid-manager.openScript",
       title: "Open Script",
+      arguments: [this]
+    };
+  }
+}
+
+class StoryCardsFolderItem extends vscode.TreeItem {
+  constructor(public readonly shortId: string, public readonly scenarioName: string) {
+    super("Story Cards", vscode.TreeItemCollapsibleState.Collapsed);
+    this.contextValue = "storyCardsFolder";
+    this.iconPath = new vscode.ThemeIcon("library");
+  }
+}
+
+class StoryCardItem extends vscode.TreeItem {
+  constructor(public readonly shortId: string, public readonly scenarioName: string, card: { id: string; title: string; type: string; description: string }) {
+    super(card.title || card.id || "Story Card", vscode.TreeItemCollapsibleState.None);
+    this.contextValue = "storyCard";
+    this.description = card.type || undefined;
+    this.tooltip = card.description
+      ? `${card.title || "Story Card"} [${card.type}] — ${card.description}`
+      : `${card.title || "Story Card"} [${card.type}]`;
+    this.iconPath = new vscode.ThemeIcon("note");
+    (this as any).cardId = card.id;
+    this.command = {
+      command: "aid-manager.openStoryCard",
+      title: "Open Story Card",
       arguments: [this]
     };
   }
