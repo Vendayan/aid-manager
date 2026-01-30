@@ -1,4 +1,4 @@
-# aid-manager README
+# AI Dungeon Script Manager
 
 VS Code extension for editing scripts related to AI Dungeon.
 
@@ -7,34 +7,28 @@ VS Code extension for editing scripts related to AI Dungeon.
 - Itemizes scenarios into a treeview allowing easier access to manage scripts.
 - Command palette action to look up any published scenario by ID (`Lookup Scenario by ID`) and pin it in the tree
 
-## Getting Started
-
-1. Press `F5` — the default launch runs `npm run ensure:deps` to install missing deps, then builds and starts the extension.
-2. Optional: run `npm run ensure:deps` manually if you want to install before launching.
-3. Build the webview UI with `npm run build:webview` (run automatically during publish).
-
-## Requirements
-
-VS Code version 1.102 or later
-
 ## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
 
 This extension contributes the following settings:
 
-* `aid-manager.userName`: The username associated with the account you'd like top login to.
-* `aid-manager.AIDEndpoint`: The endpoint for the AID environment you'd like to access.
+* `aid-manager.userName`: The username associated with the account you want to log in as.
+* `aid-manager.AIDEndpoint`: The GraphQL endpoint for the AI Dungeon API.
+* `aid-manager.firebaseApiKey`: Public Firebase API key (do not change).
+* `aid-manager.authHeaderName`: HTTP header name for auth (do not change).
+* `aid-manager.authHeaderFormat`: Auth header value format (do not change).
 
 ## Known Issues
 
 ## Release Notes
 
-### 1.0.0
+### 0.1.1
 
-Initial
+- Fix activation issues in the Marketplace build (sign-in command now works).
+- Add a cleaner Marketplace icon.
+
+### 0.1.0
+
+- Initial release
 
 ## Webview UI
 

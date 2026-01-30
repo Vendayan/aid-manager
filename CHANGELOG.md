@@ -6,4 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.1]
+
+- Fix activation issues in the Marketplace build (sign-in command now works).
+- Add a cleaner Marketplace icon.
+
+## [0.1.0]
+
 - Initial release

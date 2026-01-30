@@ -3,7 +3,16 @@
   "displayName": "AI Dungeon Script Manager",
   "publisher": "Vendayan",
   "description": "Manage AI Dungeon scenarios and scripts",
-  "version": "0.0.1",
+  "homepage": "https://github.com/Vendayan/aid-manager",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vendayan/aid-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Vendayan/aid-manager/issues"
+  },
+  "icon": "resources/marketplace-icon.png",
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.102.0"
   },
@@ -15,7 +24,9 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onViewContainer:aid-manager"
+    "onViewContainer:aid-manager",
+    "onCommand:aid-manager.signIn",
+    "onCommand:aid-manager.signOut"
   ],
   "contributes": {
     "viewsContainers": {

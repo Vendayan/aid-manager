@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"
+     viewBox="0 0 128 128" fill="none" stroke="none"
+     role="img" aria-labelledby="title desc">
+  <title id="title">AID</title>
+  <desc id="desc">AID lettermark for Marketplace icon</desc>
+
+  <rect x="8" y="8" width="112" height="112" rx="18" fill="#0f1115"/>
+
+  <g stroke="#f5f5f5" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" transform="translate(-9 0)">
+    <!-- A -->
+    <path d="M28 98L43 30L58 98"/>
+    <path d="M34 72H52"/>
+
+    <!-- I -->
+    <path d="M70 30V98"/>
+
+    <!-- D -->
+    <path d="M86 30H94C110 30 118 42 118 64C118 86 110 98 94 98H86Z"/>
+  </g>
+</svg>
