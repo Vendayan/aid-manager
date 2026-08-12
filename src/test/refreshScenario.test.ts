@@ -9,6 +9,7 @@ suite("refreshScenario helper", () => {
     const events = {
       clearSnapshot: 0,
       requestServerReload: 0,
+      forceRefreshStoryCards: 0,
       revert: 0,
       closeEditors: 0
     };
@@ -37,7 +38,8 @@ suite("refreshScenario helper", () => {
     } = {
       scenarioService: {
         shouldPurgeOnRefresh: async () => !!opts?.shouldPurge,
-        requestServerReload: () => { events.requestServerReload += 1; }
+        requestServerReload: () => { events.requestServerReload += 1; },
+        forceRefreshStoryCards: async () => { events.forceRefreshStoryCards += 1; }
       } as any,
       fsProvider: {
         clearSnapshot: () => { events.clearSnapshot += 1; }
@@ -72,6 +74,7 @@ suite("refreshScenario helper", () => {
     assert.strictEqual(deps.confirmMessages.length, 0);
     assert.strictEqual(deps.events.clearSnapshot, 1);
     assert.strictEqual(deps.events.requestServerReload, 1);
+    assert.strictEqual(deps.events.forceRefreshStoryCards, 1);
     assert.strictEqual(deps.events.revert, 0);
     assert.strictEqual(deps.panelMeta.disposed, true);
     assert.deepStrictEqual(deps.reopenCalls, [{ shortId: "demo", column: vscode.ViewColumn.Two }]);
@@ -83,6 +86,7 @@ suite("refreshScenario helper", () => {
 
     assert.strictEqual(result, false);
     assert.strictEqual(deps.events.clearSnapshot, 0);
+    assert.strictEqual(deps.events.forceRefreshStoryCards, 0);
     assert.strictEqual(deps.panelMeta.disposed, false);
   });
 
@@ -93,6 +97,7 @@ suite("refreshScenario helper", () => {
     assert.strictEqual(result, true);
     assert.strictEqual(deps.events.clearSnapshot, 1);
     assert.strictEqual(deps.events.requestServerReload, 1);
+    assert.strictEqual(deps.events.forceRefreshStoryCards, 1);
     assert.strictEqual(deps.events.revert, 1);
     assert.strictEqual(deps.events.closeEditors, 1);
     assert.strictEqual(deps.panelMeta.disposed, true);

@@ -33,7 +33,7 @@ export class ScenarioService {
   private webviewStateWaiters = new WeakMap<vscode.Webview, Map<string, { resolve: (value: any) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>>();
   // Tree-facing state (owns cache for scenario tree presentation)
   private treeStore = new LocalStore();
-  private scenarioInfoCache = new Map<string, { isContainer: boolean; children: Scenario[] }>();
+  private scenarioInfoCache = new Map<string, { isContainer: boolean; children: Scenario[]; hasScripts?: boolean }>();
   private treeEmitter = new vscode.EventEmitter<string | undefined>();
   public readonly onDidChangeTreeState = this.treeEmitter.event;
   private pageSize = 100;
@@ -125,7 +125,7 @@ export class ScenarioService {
     }
   }
 
-  public async getScenarioInfoCached(shortId: string): Promise<{ isContainer: boolean; children: Scenario[] }> {
+  public async getScenarioInfoCached(shortId: string): Promise<{ isContainer: boolean; children: Scenario[]; hasScripts?: boolean }> {
     let info = this.scenarioInfoCache.get(shortId);
     if (!info) {
       info = await this.client.getScenarioInfo(shortId);
@@ -599,6 +599,7 @@ export class ScenarioService {
   }
 
   private baseScenarioFields(model: any): any {
+    const state = model?.state ?? {};
     return {
       id: model.id,
       contentType: model.contentType ?? "scenario", // not rendered
@@ -608,9 +609,9 @@ export class ScenarioService {
       publicId: model.publicId ?? null,
       title: model.title ?? "",
       description: model.description ?? "",
-      prompt: model.prompt ?? "",
+      prompt: state.prompt ?? model.prompt ?? "",
       memory: model.memory ?? "",
-      authorsNote: model.authorsNote ?? "",
+      authorsNote: state.authorsNote ?? model.authorsNote ?? "",
       image: model.image ?? null,
       type: model.type ?? null, // not rendered;
       contentRating: model.contentRating ?? "Unrated",
@@ -631,6 +632,9 @@ export class ScenarioService {
     return {
       scenarioId: state?.scenarioId ?? null,
       type: state?.type ?? null,
+      prompt: state?.prompt ?? "",
+      authorsNote: state?.authorsNote ?? "",
+      plotEssentials: state?.plotEssentials ?? "",
       storySummary: state?.storySummary ?? "",
       storyCardInstructions: state?.storyCardInstructions ?? "",
       storyCardStoryInformation: state?.storyCardStoryInformation ?? "",
@@ -659,7 +663,7 @@ export class ScenarioService {
         id: o.id,
         shortId: o.shortId,
         title: o.title,
-        prompt: o.prompt ?? "",
+        prompt: o.state?.prompt ?? o.prompt ?? "",
         parentScenarioId: o.parentScenarioId
       }));
     return options;

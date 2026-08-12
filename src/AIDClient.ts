@@ -60,6 +60,34 @@ export class AIDClient {
     return base;
   }
 
+  private scriptFieldsFromScenario(scenario: any): {
+    gameCodeSharedLibrary?: string | null;
+    gameCodeOnInput?: string | null;
+    gameCodeOnOutput?: string | null;
+    gameCodeOnModelContext?: string | null;
+  } {
+    const scripts = scenario?.state?.scripts ?? {};
+    return {
+      gameCodeSharedLibrary: scripts.sharedLibrary ?? scenario?.gameCodeSharedLibrary ?? null,
+      gameCodeOnInput: scripts.onInput ?? scenario?.gameCodeOnInput ?? null,
+      gameCodeOnOutput: scripts.onOutput ?? scenario?.gameCodeOnOutput ?? null,
+      gameCodeOnModelContext: scripts.onModelContext ?? scenario?.gameCodeOnModelContext ?? null
+    };
+  }
+
+  private scriptStateField(event: ScriptEvent): "sharedLibrary" | "onInput" | "onOutput" | "onModelContext" {
+    switch (event) {
+      case "sharedLibrary":
+        return "sharedLibrary";
+      case "onInput":
+        return "onInput";
+      case "onOutput":
+        return "onOutput";
+      case "onModelContext":
+        return "onModelContext";
+    }
+  }
+
   async gql<T>(req: GraphQLRequest): Promise<T> {
     let token: string;
     try {
@@ -235,7 +263,7 @@ export class AIDClient {
    * Determine if a scenario is a container (has real child options) and return children.
    * We filter out the header option: the one whose shortId equals the root shortId.
    */
-  async getScenarioInfo(shortId: string): Promise<{ isContainer: boolean; children: Scenario[] }> {
+  async getScenarioInfo(shortId: string): Promise<{ isContainer: boolean; children: Scenario[]; hasScripts: boolean }> {
     type Opt = {
       id: string;
       shortId: string;
@@ -243,14 +271,15 @@ export class AIDClient {
       parentScenarioId?: string | null;
       __typename?: string;
     };
-    type Resp = { scenario: { id: string; shortId: string; options?: Opt[] | null } | null };
+    type Resp = { scenario: { id: string; shortId: string; scriptsEnabled?: boolean | null; options?: Opt[] | null } | null };
 
     const query = `
-      query GetScenario($shortId: String) {
-        scenario(shortId: $shortId) {
+      query GetScenario($shortId: String, $viewPublished: Boolean) {
+        scenario(shortId: $shortId, viewPublished: $viewPublished) {
           id
           shortId
-          options {
+          scriptsEnabled
+          options(viewPublished: $viewPublished) {
             id
             shortId
             title
@@ -260,7 +289,7 @@ export class AIDClient {
         }
       }`;
 
-    const res = await this.gql<Resp>({ query, variables: { shortId }, operationName: "GetScenario" });
+    const res = await this.gql<Resp>({ query, variables: { shortId, viewPublished: false }, operationName: "GetScenario" });
     const root = res?.scenario;
     const rawOpts: Opt[] = Array.isArray(root?.options) ? (root!.options as Opt[]) : [];
 
@@ -280,7 +309,8 @@ export class AIDClient {
       }));
 
     const isContainer = children.length > 0;
-    return { isContainer, children };
+    const hasScripts = typeof root?.scriptsEnabled === "boolean" ? root.scriptsEnabled : !isContainer;
+    return { isContainer, children, hasScripts };
   }
 
   /**
@@ -292,8 +322,8 @@ export class AIDClient {
       scenario: any | null;
     };
     const query = `
-      query GetScenario($shortId: String) {
-        scenario(shortId: $shortId) {
+      query GetScenario($shortId: String, $viewPublished: Boolean) {
+        scenario(shortId: $shortId, viewPublished: $viewPublished) {
           id
           contentType
           createdAt
@@ -302,12 +332,13 @@ export class AIDClient {
           shortId
           title
           description
-          prompt
-          memory
-          authorsNote
+          advancedDescription
           image
           isOwner
           published
+          isPublishedSnapshot
+          publishedUpdatedAt
+          hasUnpublishedChanges
           unlisted
           allowComments
           showComments
@@ -323,6 +354,7 @@ export class AIDClient {
           contentRatingLockedAt
           contentRatingLockedMessage
           type
+          scriptsEnabled
           publishedAt
           deletedAt
           blockedAt
@@ -331,16 +363,20 @@ export class AIDClient {
             id
             shortId
             title
+            scriptsEnabled
             __typename
           }
-          options {
+          options(viewPublished: $viewPublished) {
             id
             userId
             shortId
+            published
             title
-            prompt
             parentScenarioId
             deletedAt
+            state(viewPublished: $viewPublished) {
+              prompt
+            }
             __typename
           }
           user {
@@ -353,7 +389,7 @@ export class AIDClient {
             }
             __typename
           }
-          storyCards {
+          storyCards(viewPublished: $viewPublished) {
             id
             type
             keys
@@ -368,17 +404,26 @@ export class AIDClient {
           state(viewPublished: false) {
             scenarioId
             type
+            prompt
+            authorsNote
+            plotEssentials
             storySummary
             storyCardInstructions
             storyCardStoryInformation
             scenarioStateVersion
             instructions
+            scripts {
+              onInput
+              onOutput
+              onModelContext
+              sharedLibrary
+            }
             __typename
           }
           __typename
         }
       }`;
-    const res = await this.gql<Resp>({ query, variables: { shortId }, operationName: "GetScenario" });
+    const res = await this.gql<Resp>({ query, variables: { shortId, viewPublished: false }, operationName: "GetScenario" });
     return res.scenario ?? {};
   }
 
@@ -390,6 +435,14 @@ export class AIDClient {
   }> {
     type Resp = {
       scenario: {
+        state?: {
+          scripts?: {
+            sharedLibrary?: string | null;
+            onInput?: string | null;
+            onOutput?: string | null;
+            onModelContext?: string | null;
+          } | null;
+        } | null;
         gameCodeSharedLibrary?: string | null;
         gameCodeOnInput?: string | null;
         gameCodeOnOutput?: string | null;
@@ -399,27 +452,40 @@ export class AIDClient {
     const query = `
       query GetScenarioScripting($shortId: String) {
         scenario(shortId: $shortId) {
-          gameCodeSharedLibrary
-          gameCodeOnInput
-          gameCodeOnOutput
-          gameCodeOnModelContext
+          state {
+            scripts {
+              sharedLibrary
+              onInput
+              onOutput
+              onModelContext
+            }
+          }
         }
       }`;
     const res = await this.gql<Resp>({ query, variables: { shortId }, operationName: "GetScenarioScripting" });
-    return res.scenario ?? {};
+    return this.scriptFieldsFromScenario(res.scenario);
   }
 
   async getScenarioScriptField(shortId: string, event: ScriptEvent): Promise<string> {
     const field = FIELD_BY_EVENT[event];
-    type Resp = { scenario: Record<string, string | null> | null };
+    const stateField = this.scriptStateField(event);
+    type Resp = {
+      scenario: {
+        state?: { scripts?: Record<string, string | null> | null } | null;
+      } & Record<string, string | null | object | undefined> | null
+    };
     const query = `
       query GetScenarioScripting($shortId: String) {
         scenario(shortId: $shortId) {
-          ${field}
+          state {
+            scripts {
+              ${stateField}
+            }
+          }
         }
       }`;
     const res = await this.gql<Resp>({ query, variables: { shortId }, operationName: "GetScenarioScripting" });
-    const val = res?.scenario?.[field];
+    const val = res?.scenario?.state?.scripts?.[stateField] ?? res?.scenario?.[field];
     return typeof val === "string" ? val : "";
   }
 
@@ -446,10 +512,14 @@ export class AIDClient {
           message
           scenario {
             id
-            gameCodeSharedLibrary
-            gameCodeOnInput
-            gameCodeOnOutput
-            gameCodeOnModelContext
+            state {
+              scripts {
+                onInput
+                onOutput
+                onModelContext
+                sharedLibrary
+              }
+            }
             __typename
           }
           __typename
@@ -460,6 +530,14 @@ export class AIDClient {
         success: boolean;
         message?: string | null;
         scenario?: {
+          state?: {
+            scripts?: {
+              sharedLibrary?: string | null;
+              onInput?: string | null;
+              onOutput?: string | null;
+              onModelContext?: string | null;
+            } | null;
+          } | null;
           gameCodeSharedLibrary?: string | null;
           gameCodeOnInput?: string | null;
           gameCodeOnOutput?: string | null;
@@ -477,6 +555,9 @@ export class AIDClient {
     const payload = res.updateScenarioScripts;
     if (!payload?.success) {
       throw new Error(payload?.message || "updateScenarioScripts failed");
+    }
+    if (payload.scenario) {
+      payload.scenario = this.scriptFieldsFromScenario(payload.scenario);
     }
     return payload;
   }
@@ -640,6 +721,10 @@ export class AIDClient {
         deleteStoryCard(input: $input) {
           success
           message
+          storyCard {
+            id
+            deletedAt
+          }
           __typename
         }
       }
@@ -692,9 +777,6 @@ export class AIDClient {
             shortId
             title
             description
-            prompt
-            memory
-            authorsNote
             tags
             contentRating
             allowComments
@@ -708,6 +790,9 @@ export class AIDClient {
               storyCardInstructions
               storyCardStoryInformation
               scenarioStateVersion
+              prompt
+              authorsNote
+              plotEssentials
               instructions
             }
           }

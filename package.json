@@ -131,7 +131,7 @@
         { "command": "aid-manager.openScript", "when": "never" },
         { "command": "aid-manager.saveScriptLocal", "when": "never" },
         { "command": "aid-manager.exportScenarioScripts", "when": "never" },
-        { "command": "aid-manager.signIn", "when": "never" },
+        { "command": "aid-manager.signIn", "when": "!aid-manager.isAuthed" },
         { "command": "aid-manager.loadMoreScenarios", "when": "never" },
         { "command": "aid-manager.lookupScenario" },
         { "command": "aid-manager.unpinScenario", "when": "never" },
@@ -143,6 +143,11 @@
         { "command": "aid-manager.openScenarioForm", "when": "never" }
       ],
       "view/title": [
+        {
+          "command": "aid-manager.signIn",
+          "when": "view == aid-manager.scenarios && !aid-manager.isAuthed",
+          "group": "navigation@1"
+        },
         {
           "command": "aid-manager.refresh",
           "when": "view == aid-manager.scenarios && aid-manager.isAuthed",

@@ -129,24 +129,14 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           for (const it of childItems) {
             this._scenarioItems.set(it.data.shortId, it);
           }
+          if (info.hasScripts) {
+            return [...childItems, ...await this.scriptChildren(shortId, scenarioName)];
+          }
           return childItems;
         }
 
         // ---- leaf: show scripts (existing behavior) ----
-        try {
-          await this.scenarios.getScriptSnapshotForTree(shortId);
-        } catch (err: any) {
-          const msg = String(err?.message || err);
-          const friendly = msg.includes("AUTH")
-            ? "Authentication required to load scripts."
-            : "Scripts unavailable (not owner or access denied).";
-          // Show the warning but still render script rows in a "missing" state.
-          const rows = this.rowsFrom(shortId, scenarioName);
-          return [new InfoItem(friendly), ...rows];
-        }
-
-        const storyCardsFolder = new StoryCardsFolderItem(shortId, scenarioName);
-        return [storyCardsFolder, ...this.rowsFrom(shortId, scenarioName)];
+        return this.scriptChildren(shortId, scenarioName);
       }
 
       if (el instanceof StoryCardsFolderItem) {
@@ -191,6 +181,23 @@ export class ScenarioTreeProvider implements vscode.TreeDataProvider<vscode.Tree
       };
       return new ScriptRow(data);
     });
+  }
+
+  private async scriptChildren(shortId: string, scenarioName: string): Promise<vscode.TreeItem[]> {
+    try {
+      await this.scenarios.getScriptSnapshotForTree(shortId);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const friendly = msg.includes("AUTH")
+        ? "Authentication required to load scripts."
+        : "Scripts unavailable (not owner or access denied).";
+      // Show the warning but still render script rows in a "missing" state.
+      const rows = this.rowsFrom(shortId, scenarioName);
+      return [new InfoItem(friendly), ...rows];
+    }
+
+    const storyCardsFolder = new StoryCardsFolderItem(shortId, scenarioName);
+    return [storyCardsFolder, ...this.rowsFrom(shortId, scenarioName)];
   }
 
   async handleDrag(source: readonly vscode.TreeItem[], dataTransfer: vscode.DataTransfer): Promise<void> {
