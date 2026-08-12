@@ -78,17 +78,17 @@ export class AuthService {
     }
 
     // --- OPTION B: Manual Tokens Fallback ---
-    const token = await vscode.window.showInputBox({ 
-      prompt: "Step 1/2: Paste Firebase ID token (JWT)", 
-      password: true, 
-      validateInput: v => (v?.trim() ? undefined : "ID Token is required") 
+    const token = await vscode.window.showInputBox({
+      prompt: "Step 1/2: Paste Firebase ID token (JWT)",
+      password: true,
+      validateInput: v => (v?.trim() ? undefined : "ID Token is required")
     });
     if (!token) { return false; }
 
-    const refreshToken = await vscode.window.showInputBox({ 
-      prompt: "Step 2/2: Paste Firebase Refresh Token", 
-      password: true, 
-      validateInput: v => (v?.trim() ? undefined : "Refresh Token is required") 
+    const refreshToken = await vscode.window.showInputBox({
+      prompt: "Step 2/2: Paste Firebase Refresh Token",
+      password: true,
+      validateInput: v => (v?.trim() ? undefined : "Refresh Token is required")
     });
     if (!refreshToken) { return false; }
 
