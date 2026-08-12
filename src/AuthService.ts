@@ -81,19 +81,19 @@ export class AuthService {
     const token = await vscode.window.showInputBox({ 
       prompt: "Step 1/2: Paste Firebase ID token (JWT)", 
       password: true, 
-      validateInput: v => (v ? undefined : "ID Token is required") 
+      validateInput: v => (v?.trim() ? undefined : "ID Token is required") 
     });
     if (!token) { return false; }
 
     const refreshToken = await vscode.window.showInputBox({ 
       prompt: "Step 2/2: Paste Firebase Refresh Token", 
       password: true, 
-      validateInput: v => (v ? undefined : "Refresh Token is required") 
+      validateInput: v => (v?.trim() ? undefined : "Refresh Token is required") 
     });
     if (!refreshToken) { return false; }
 
-    await this.ctx.secrets.store(TOKEN_KEY, token);
-    await this.ctx.secrets.store(REFRESH_KEY, refreshToken);
+    await this.ctx.secrets.store(TOKEN_KEY, token.trim());
+    await this.ctx.secrets.store(REFRESH_KEY, refreshToken.trim());
 
     vscode.window.showInformationMessage("Tokens saved! Auto-refresh is active.");
     return true;

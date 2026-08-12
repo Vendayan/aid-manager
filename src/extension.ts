@@ -263,7 +263,8 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('aid-manager.signIn', async () => {
       const ok = await auth.signInFlow();
-      await setAuthed(!!ok);
+      const state = ok ? await auth.authState().catch(() => "missing") : "missing";
+      await setAuthed(state === "valid");
       tree.refresh();
     })
   );
