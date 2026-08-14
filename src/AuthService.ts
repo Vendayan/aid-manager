@@ -37,62 +37,66 @@ export class AuthService {
   }
 
 
-
   async signInFlow(): Promise<boolean> {
-    // Token-only flow (Google blocks email/password from Node: API_KEY_HTTP_REFERRER_BLOCKED)
-    const token = await vscode.window.showInputBox({
-      prompt: "Paste your Firebase ID token (JWT)",
-      password: true,
-      validateInput: v => v ? undefined : "Token is required"
-    });
-    if (!token) { return false; }
-
-    await this.ctx.secrets.store(TOKEN_KEY, token);
-    // No refresh token via this path; user must re-paste when expired.
-    vscode.window.showInformationMessage(
-      "Token saved. Note: Email/Password login is blocked by Google key restrictions."
-    );
-    return true;
-
-
-    /*
-      Simplified this to the function above when I realized I couldn't use email/password
-      Still feels cute; might have to delete later.
-
     const method = await vscode.window.showQuickPick(
       [
-        { label: "Email + Password", method: "password" as const },
-        { label: "Paste Firebase Token", method: "token" as const }
+        { label: "Email + Password (If using SSO define password in Account Settings -> Manage Account)", method: "password" as const },
+        { label: "Paste Tokens Manually", method: "token" as const }
       ],
-      { placeHolder: "Choose how to sign in" }
+      { placeHolder: "Choose how to sign in to AI Dungeon" }
     );
     if (!method) { return false; }
 
-    if (method.method === "token") {
-      const pasted = await vscode.window.showInputBox({ prompt: "Paste Firebase ID token (JWT)", password: true });
-      if (!pasted) { return false; }
-      await this.ctx.secrets.store(TOKEN_KEY, pasted);
-      // No refresh token in this path.
-      vscode.window.showInformationMessage("Token saved.");
-      return true;
+    // --- OPTION A: Email & Password Flow ---
+    if (method.method === "password") {
+      const email = await vscode.window.showInputBox({ 
+        prompt: "AI Dungeon Account Email", 
+        validateInput: v => (v ? undefined : "Email is required") 
+      });
+      if (!email) { return false; }
+
+      const password = await vscode.window.showInputBox({ 
+        prompt: "AI Dungeon Password", 
+        password: true, 
+        validateInput: v => (v ? undefined : "Password is required") 
+      });
+      if (!password) { return false; }
+
+      try {
+        // Exchange email + password for BOTH idToken and refreshToken
+        const { idToken, refreshToken } = await this.exchangeEmailPasswordForToken(email, password);
+        
+        await this.ctx.secrets.store(TOKEN_KEY, idToken);
+        await this.ctx.secrets.store(REFRESH_KEY, refreshToken);
+
+        vscode.window.showInformationMessage("Signed in successfully! Auto-refresh is now active.");
+        return true;
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Sign-in failed: ${err?.message ?? err}`);
+        return false;
+      }
     }
 
-    const email = await vscode.window.showInputBox({ prompt: "Email", validateInput: v => (v ? undefined : "Required") });
-    if (!email) { return false; }
-    const password = await vscode.window.showInputBox({ prompt: "Password", password: true, validateInput: v => (v ? undefined : "Required") });
-    if (!password) { return false; }
+    // --- OPTION B: Manual Tokens Fallback ---
+    const token = await vscode.window.showInputBox({ 
+      prompt: "Step 1/2: Paste Firebase ID token (JWT)", 
+      password: true, 
+      validateInput: v => (v ? undefined : "ID Token is required") 
+    });
+    if (!token) { return false; }
 
-    try {
-      const { idToken, refreshToken } = await this.exchangeEmailPasswordForToken(email, password);
-      await this.ctx.secrets.store(TOKEN_KEY, idToken);
-      await this.ctx.secrets.store(REFRESH_KEY, refreshToken);
-      vscode.window.showInformationMessage("Signed in.");
-      return true;
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Sign-in failed: ${err?.message ?? err}`);
-      return false;
-    }
-    */
+    const refreshToken = await vscode.window.showInputBox({ 
+      prompt: "Step 2/2: Paste Firebase Refresh Token", 
+      password: true, 
+      validateInput: v => (v ? undefined : "Refresh Token is required") 
+    });
+    if (!refreshToken) { return false; }
+
+    await this.ctx.secrets.store(TOKEN_KEY, token);
+    await this.ctx.secrets.store(REFRESH_KEY, refreshToken);
+
+    vscode.window.showInformationMessage("Tokens saved! Auto-refresh is active.");
+    return true;
   }
 
 
@@ -144,7 +148,11 @@ export class AuthService {
 
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { 
+        "content-type": "application/json",
+        "Referer": "https://play.aidungeon.com/",
+        "Origin": "https://play.aidungeon.com"
+      },
       body: JSON.stringify({ email, password, returnSecureToken: true })
     });
 
